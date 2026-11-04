@@ -1,0 +1,53 @@
+appId: io.trifluisnote.app
+productName: Trifluisnote
+copyright: Copyright © 2026 Fey
+
+# 与 electron-builder.yml 相同，只是输出目录换成 release/next。
+# 用途：正在运行的 Trifluisnote 会锁住 release\win-unpacked\resources\app.asar，
+# 导致 electron-builder 无法原地重打包；先用这个配置出到 release/next，
+# 再把产物覆盖回 release\ 即可，不必先退出正在运行的程序。
+
+directories:
+  output: release/next
+  buildResources: build
+
+files:
+  - out/**/*
+  - package.json
+
+asar: true
+
+# 只保留中英文，减小安装包体积
+electronLanguages:
+  - zh-CN
+  - en-US
+
+win:
+  target:
+    - target: nsis
+      arch:
+        - x64
+    - target: portable
+      arch:
+        - x64
+  artifactName: ${productName}-${version}-${arch}-setup.${ext}
+
+nsis:
+  oneClick: false
+  perMachine: false
+  allowToChangeInstallationDirectory: true
+  createDesktopShortcut: true
+  createStartMenuShortcut: true
+  shortcutName: Trifluisnote
+  deleteAppDataOnUninstall: false
+
+portable:
+  artifactName: ${productName}-${version}-${arch}-portable.${ext}
+
+# 双击 .md 文件直接用 Trifluisnote 打开
+fileAssociations:
+  - ext: md
+    name: Markdown Document
+    description: Markdown 文档
+    role: Editor
+    icon: build/md.ico

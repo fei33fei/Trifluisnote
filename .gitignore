@@ -1,0 +1,36 @@
+# 依赖
+node_modules/
+
+# 构建产物（electron-vite 编译输出，package.json 的 main 指向 out/main/index.js，由构建生成）
+out/
+dist/
+
+# 打包产物（electron-builder 输出，含 100MB+ 的 exe，交给 GitHub Releases 发布而非入库）
+release/
+
+# TypeScript 增量编译缓存
+*.tsbuildinfo
+
+# 导出链路的验证产物
+export-test-out/
+tmp-export-test/
+
+# 运行时 / 临时目录
+.tmp-profile/
+.tmp-*/
+.vite/
+
+# 日志
+*.log
+npm-debug.log*
+yarn-error.log*
+
+# 本地环境变量
+.env
+.env.*
+!.env.example
+
+# 系统垃圾文件
+.DS_Store
+Thumbs.db
+desktop.ini

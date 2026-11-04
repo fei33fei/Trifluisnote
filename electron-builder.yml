@@ -1,0 +1,48 @@
+appId: io.trifluisnote.app
+productName: Trifluisnote
+copyright: Copyright © 2026 Fey
+
+directories:
+  output: release
+  buildResources: build
+
+files:
+  - out/**/*
+  - package.json
+
+asar: true
+
+# 只保留中英文，减小安装包体积
+electronLanguages:
+  - zh-CN
+  - en-US
+
+win:
+  target:
+    - target: nsis
+      arch:
+        - x64
+    - target: portable
+      arch:
+        - x64
+  artifactName: ${productName}-${version}-${arch}-setup.${ext}
+
+nsis:
+  oneClick: false
+  perMachine: false
+  allowToChangeInstallationDirectory: true
+  createDesktopShortcut: true
+  createStartMenuShortcut: true
+  shortcutName: Trifluisnote
+  deleteAppDataOnUninstall: false
+
+portable:
+  artifactName: ${productName}-${version}-${arch}-portable.${ext}
+
+# 双击 .md 文件直接用 Trifluisnote 打开
+fileAssociations:
+  - ext: md
+    name: Markdown Document
+    description: Markdown 文档
+    role: Editor
+    icon: build/md.ico
