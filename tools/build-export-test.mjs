@@ -4,7 +4,7 @@ import { build } from 'vite'
 import path from 'node:path'
 import fs from 'node:fs'
 
-const root = 'D:/Fey/Desktop/rea-typora/trifluisnote'
+const root = process.cwd()
 const outDir = path.join(root, 'tmp-export-test')
 
 fs.rmSync(outDir, { recursive: true, force: true })

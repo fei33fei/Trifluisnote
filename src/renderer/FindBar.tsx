@@ -16,7 +16,7 @@ export interface FindBarProps {
 /**
  * 查找 / 替换栏。
  *
- * 和 Typora 一样用 Ctrl+F 唤起；「上一个 / 下一个」按命中顺序循环。
+ * 用 Ctrl+F 唤起；「上一个 / 下一个」按命中顺序循环。
  */
 export function FindBar(props: FindBarProps) {
   const { open, onClose, onSearch, onGoTo, onReplaceOne, onReplaceAll } = props

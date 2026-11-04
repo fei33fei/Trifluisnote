@@ -1,33 +1,105 @@
 # Trifluisnote
 
-Trifluisnote —— 对 md 文件进行编辑修改的工具：一个所见即所得的 Markdown 桌面编辑器，
-功能对齐 Typora，**不需要激活码，开箱即用**。
+![Trifluisnote 主界面](docs/screenshot.png)
 
-> 设计依据来自开发工作区中的 `REPORT.md`（Typora 逆向结论）与 `TRIFLUISNOTE-PLAN.md`
-> （开发路线图）；这两份文档属于逆向工作区，未包含在本仓库中。
+> **所见即所得的 Markdown 桌面编辑器** —— 本地、开箱即用。
+
+[![version](https://img.shields.io/badge/version-v0.1.0-2ea44f?style=flat-square)](https://github.com/fei33fei/Trifluisnote/releases)
+[![license](https://img.shields.io/badge/license-MIT-2ea44f?style=flat-square)](./LICENSE)
+![platform](https://img.shields.io/badge/platform-Windows%20x64-0078d4?style=flat-square)
+![electron](https://img.shields.io/badge/Electron-45-47848F?style=flat-square)
+![react](https://img.shields.io/badge/React-19-61dafb?style=flat-square)
+
+输入 Markdown 的同时看到渲染结果，源码模式与所见即所得共用同一份文档模型。
+**纯本地运行：文件不出本机，不联网，不订阅。**
+
+## 目录
+
+- [为什么做这个](#为什么做这个)
+- [特性](#特性)
+- [快速开始](#快速开始)
+- [打开本地已有的 md 文件](#打开本地已有的-md-文件)
+- [v0.1 功能](#v01-功能)
+- [快捷键](#快捷键)
+- [开发](#开发)
+- [架构](#架构)
+- [实现要点](#实现要点五个踩过的坑)
+- [验证](#验证)
+- [技术选型](#技术选型)
+- [已知限制](#已知限制)
+- [许可证](#许可证)
+
+## 为什么做这个
+
+市面上的 Markdown 编辑器大多要么收费订阅、要么要联网登录，要么在中文排版和老文件编码上反复翻车。
+想写点东西而已，却要先解决一堆前置条件。
+
+Trifluisnote 是为自己写的一个编辑器，目标很直接：
+
+- **打开就能写** —— 下载即用，不联网、不登录。
+- **所见即所得，但要可信** —— 渲染结果和源码必须是同一份文档的两种视图，不会出现「预览和源码对不上」。
+- **不弄丢用户的文件** —— 老文件是什么编码，保存时就还是什么编码；格式该是什么样，保存后就还是什么样。
+- **可自己改** —— 代码结构清晰，四层分层，核心层不依赖 Electron / React，可以单独拿去用。
+
+## 特性
+
+| | |
+|---|---|
+| 🖊️ **所见即所得** | 输入即渲染，`Ctrl+/` 随时切回源码模式 |
+| 📋 **GFM 完整支持** | 表格、任务列表、删除线、自动链接 |
+| 🎨 **代码高亮** | 190+ 语言（highlight.js），主题随配色切换 |
+| 🗂️ **大纲侧栏** | `Ctrl+Shift+O` 开关，点击标题跳转 |
+| 🔍 **查找替换** | `Ctrl+F`，支持全量替换与区分大小写 |
+| 🪟 **多窗口** | 记事本式，每窗口一个独立文档 |
+| 📤 **导出** | HTML（独立文件，带主题样式）/ PDF（A4，Chromium 排版） |
+| 🎨 **主题** | 6 套，浅色 / 深色各三套 |
+| 🧩 **编码兼容** | UTF-8 / UTF-8 BOM / UTF-16 / GBK，读时探测、写时按原编码回写 |
+| 🔗 **文件关联** | 安装版注册 `.md` 关联，右键「打开方式」直接进 |
 
 ## 快速开始
 
-直接跑便携版即可（免安装、免配置）：
+到 [Releases](https://github.com/fei33fei/Trifluisnote/releases) 下载 Windows 版本：
 
-```
-release\Trifluisnote-0.1.0-x64-portable.exe     (103.6 MiB)
-```
+| 版本 | 文件 | 说明 |
+|---|---|---|
+| 便携版 | `Trifluisnote-0.1.0-x64-portable.exe` | 免安装，双击即用，适合试用 |
+| 安装版 | `Trifluisnote-0.1.0-x64-setup.exe` | NSIS 安装包，已注册 `.md` 文件关联 |
 
-或者用安装包：
+> `release/` 目录不入库（单个产物 100MB+，超过 GitHub 单文件上限），需要在本地复现时按
+> [开发](#开发) 一节执行 `npm run dist:portable` / `npm run dist:nsis`。
 
-```
-release\Trifluisnote-0.1.0-x64-setup.exe        (116.1 MiB)
-```
-
-> 预编译的 Windows 产物发布在仓库的 Releases 页面；`release/` 目录不入库，
-> 需要在本地复现时按下方「开发」一节执行 `npm run dist` / `npm run dist:portable`。
-
-也可以带上文件路径启动（也可直接双击 `.md` 文件，安装版已注册文件关联）：
+也可以带上文件路径启动：
 
 ```
 Trifluisnote.exe D:\notes\my-note.md
 ```
+
+## 打开本地已有的 md 文件
+
+装完之后有四条路都能打开本地文件，任意一条都走同一套主进程读取逻辑
+（所以编码探测、绝对路径、错误提示的行为完全一致）：
+
+| 方式 | 说明 |
+|---|---|
+| 双击 `.md` 文件 | 安装版注册了文件关联（`.md` → `Trifluisnote.exe "%1"`） |
+| 右键 → 打开方式 → Trifluisnote | 安装器会写 `Applications\Trifluisnote.exe`，所以这个应用**出现在「打开方式」列表里** |
+| 拖进窗口 | 走主进程读取，不是渲染层自己读 |
+| `Ctrl+O` / 工具栏「打开」 | 文件选择框 |
+
+> electron-builder 自带的 `APP_ASSOCIATE` 宏只写「扩展名 → ProgID → 打开命令」，
+> **不写** `Applications\<exe>`。少了这一项应用就不在「打开方式」列表里，
+> 用户右键 md 文件根本找不到它。补写这段注册的是 `build/installer.nsh`。
+
+### 编码：老文件不是 UTF-8 也能正常打开
+
+国内用户手上「原本就有」的 md 文件绝大多数是 **GBK/GB18030**（记事本、Word 另存、
+老工具导出都是这个编码）。按 UTF-8 硬解会整篇乱码，用户看到的就是「文件打不开」。
+
+所以 Trifluisnote 读文件时会先探 BOM、再试严格 UTF-8、失败才退 GBK；
+**保存时按读出来时的原编码写回去**，不会把用户的 GBK 文件悄悄改成 UTF-8。
+当前文件的编码显示在状态栏里（`UTF-8` / `UTF-8 (BOM)` / `GBK` / `UTF-16 LE`）。
+
+> 唯一例外是「另存为」——那是一个新文件，统一写成无 BOM 的 UTF-8。
 
 ## v0.1 功能
 
@@ -71,7 +143,11 @@ npm run dist:nsis      # NSIS 安装包
 npm run dist:portable  # 单文件便携版
 ```
 
-### 目录结构
+要求 Node ≥ 18、npm ≥ 9；Windows 上打包需要 WebView2 与 .NET Framework 4.8（electron-builder 的 NSIS 依赖）。
+
+## 架构
+
+四层，依赖方向自上而下，核心层不碰任何平台 API：
 
 ```
 src/
@@ -85,22 +161,32 @@ src/
 │  ├─ windows.ts    窗口与文档状态（每窗口一文档）
 │  ├─ ipc.ts        文件 / 导出 / 状态 IPC
 │  ├─ menu.ts       中文菜单
+│  ├─ encoding.ts   文件编码探测与回写（UTF-8 / BOM / UTF-16 / GBK）
 │  └─ export.ts     HTML 模板 + Chromium printToPDF
 ├─ preload/         contextBridge 暴露的 API
 ├─ renderer/        React 界面（App / EditorPane / OutlinePanel / FindBar）
 └─ shared/          主进程与渲染进程共用
    ├─ types.ts      IPC 类型契约
+   ├─ encoding.ts   编码名显示（状态栏）
    └─ theme-css.ts  主题变量 + 文档排版 + 代码配色（渲染层与导出共用）
+```
+
+打包相关的两个文件：
+
+```
+build/
+├─ icon.ico / md.ico   应用图标 / 文件关联图标
+└─ installer.nsh        补写 Applications\<exe> 注册项（让应用出现在「打开方式」里）
 ```
 
 **分层约束**：`src/core/` 不 import 任何 Electron / React API；
 `src/shared/theme-css.ts` 里的 CSS 字符串同时被渲染层注入和主进程导出使用，
 保证「编辑器里看到的」和「导出的」完全一致。
 
-## 四个踩过的坑（都写在了源码注释里）
+## 实现要点：五个踩过的坑
 
-这四个都不是「Typora 有而我们没有」的功能问题，而是 Markdown 编辑器内核的共性陷阱，
-照着实现时很容易再踩一遍：
+这五个都不是功能取舍问题，而是 Markdown 编辑器内核的共性陷阱，
+照着实现时很容易再踩一遍（对应源码里都有注释）：
 
 1. **内容回灌自激循环**（`src/renderer/App.tsx`）
    Milkdown 的 `markdownUpdated` 回调是 **200ms 防抖**的，载荷是 `latestTr.doc` 的
@@ -137,9 +223,19 @@ src/
    **解法**：在编辑区容器上挂 `mousedown`，当落点不在 `contenteditable` 内时，
    自己把坐标换算成文档位置（先用 `view.posAtCoords()` 精确命中，
    拿不到就按「最近的可编辑块 + 左右」兜底），再 `setSelection` + `focus`。
-   行为对齐 Typora：点留白 → 光标落到最近的一行。
+   行为上：点留白 → 光标落到最近的一行。
 
-## 验证方式
+5. **老 md 文件「打不开」（其实是乱码）**（`src/main/encoding.ts`）
+   `readFileSync(path, 'utf8')` 对 GBK 文件不会报错，只会解出一篇乱码 ——
+   而「打不开文件」正是用户对乱码最常见的描述。
+   Node 的 `Buffer.from(str, 'gbk')` 不存在（只能解码不能编码），
+   所以 GBK 的**回写**必须靠 `iconv-lite`；只解码的话 Node 自带的
+   `TextDecoder('gbk')` 就够了（Electron 带完整 ICU）。
+   规矩：**读时探编码，写时按原编码写回**，绝不擅自改用户文件的编码。
+   另外，拖放打开原来是在渲染层用 `FileReader` 读的（只有 UTF-8），
+   现在统一交给主进程，避免两条路径行为不一致。
+
+## 验证
 
 没有 GUI 自动化工具时，用 **CDP 探针**做程序化验证：
 
@@ -169,6 +265,12 @@ node tools\cdp-regression.mjs 9444 $env:TEMP\regression-tasklist.md
 node tools\cdp-save-test.mjs 9445 $env:TEMP\save-test-copy.md
 ```
 
+打开链路与编码的端到端回归（自己拉起应用、自造 UTF-8 / UTF-8 BOM / GBK 三种夹具）：
+
+```powershell
+node tools\cdp-open-test.mjs        # 8 项：正文正确 / BOM 不残留 / GBK 不乱码 / 保存后仍是 GBK / 窗口标题带文件名
+```
+
 开发版、`release\win-unpacked` 与便携版 exe 三者都跑过，**全部 14/14 通过**。
 
 首轮验收的三项修复另有一个专门的回归脚本（真实鼠标事件 + 真实键盘输入）：
@@ -195,11 +297,12 @@ electron.exe tools\shot-export.cjs <html> <png>                    # 截图复�
 
 | 层 | 选型 | 理由 |
 |---|---|---|
-| 编辑器内核 | Milkdown 7（ProseMirror + remark） | Markdown 语义原生、schema 可控；不抄 Typora 的 CodeMirror 5（已停维护） |
+| 编辑器内核 | Milkdown 7（ProseMirror + remark） | Markdown 语义原生、schema 可控；未采用已停维护的 CodeMirror 5 |
 | 桌面壳 | Electron 45 + electron-vite | 多窗口、菜单、导出 PDF 一条龙 |
 | 界面 | React 19 | — |
 | 打包 | electron-builder 26 | NSIS + 便携版双形态 |
 | 代码高亮 | highlight.js | 纯 JS、无原生依赖；分词后转成 ProseMirror decoration，文档模型保持纯净 |
+| 编码转换 | iconv-lite | GBK 回写必须靠它（Node 只能解码不能编码） |
 
 ## 已知限制（v0.1）
 
@@ -209,4 +312,8 @@ electron.exe tools\shot-export.cjs <html> <png>                    # 截图复�
 - 无设置持久化（主题选择每次启动回到默认）
 - 表格不支持拖拽调整列宽
 - 保存时会按 remark 的默认规则规范化排版（例如表格单元格补齐空格、
-  有序列表统一编号），与 Typora 的规范化策略不完全一致
+  有序列表统一编号），与部分 Markdown 工具的规范化策略不完全一致
+
+## 许可证
+
+[MIT](LICENSE) © Fey

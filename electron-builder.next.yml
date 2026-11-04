@@ -40,6 +40,8 @@ nsis:
   createStartMenuShortcut: true
   shortcutName: Trifluisnote
   deleteAppDataOnUninstall: false
+  # 补写 Applications\<exe> 注册项，让应用出现在「打开方式」列表里
+  include: build/installer.nsh
 
 portable:
   artifactName: ${productName}-${version}-${arch}-portable.${ext}

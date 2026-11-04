@@ -18,6 +18,7 @@ tmp-export-test/
 # 运行时 / 临时目录
 .tmp-profile/
 .tmp-*/
+.tmp-*.js
 .vite/
 
 # 日志

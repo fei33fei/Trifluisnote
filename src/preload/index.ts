@@ -3,6 +3,7 @@ import type { DocState, ExportPayload, TrifluisnoteApi } from '../shared/types'
 
 const api: TrifluisnoteApi = {
   openFile: () => ipcRenderer.invoke('dialog:open'),
+  readFile: (filePath) => ipcRenderer.invoke('file:read', filePath),
   saveFile: (filePath, content) => ipcRenderer.invoke('file:save', filePath, content),
   saveFileAs: (content, suggestedName) => ipcRenderer.invoke('file:saveAs', content, suggestedName),
   newWindow: () => ipcRenderer.invoke('window:new'),

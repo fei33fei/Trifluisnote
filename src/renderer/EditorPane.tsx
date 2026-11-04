@@ -216,7 +216,7 @@ function EditorPaneInner(props: EditorPaneProps) {
    * 必须精确点到文字行上才行。
    *
    * 这里把点击坐标换算成最近的文档位置，主动把光标放过去，
-   * 行为对齐 Typora：点留白 → 光标落到最近的一行。
+   * 行为：点留白 → 光标落到最近的一行。
    */
   const handleMouseDown = useCallback((e: React.MouseEvent<HTMLDivElement>) => {
     // 源码模式下由 textarea 自己处理

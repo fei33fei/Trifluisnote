@@ -3,9 +3,10 @@ import { basename } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { BrowserWindow } from 'electron'
 import type { DocState } from '../shared/types'
+import { decodeText } from './encoding'
 
 /**
- * 每个 BrowserWindow 承载一个独立文档 —— 与 Typora 的多窗口模型一致，
+ * 每个 BrowserWindow 承载一个独立文档 —— 记事本式多窗口模型，
  * 也和记事本一致：窗口之间互不影响，各自持有自己的文件路径。
  */
 const windows = new Map<number, DocState>()
@@ -43,15 +44,37 @@ export function createWindow(initialPath?: string): BrowserWindow {
     },
   })
 
-  const initialContent =
-    initialPath && existsSync(initialPath) ? readFileSync(initialPath, 'utf8') : ''
+  /**
+   * 打开窗口时带进来的文件。
+   *
+   * 编码必须在这里就探测好：老 md 文件是 GBK，按 UTF-8 读会整篇乱码，
+   * 用户看到的就是「文件打不开」。探测到的编码存进 DocState，
+   * 保存时按它写回去，不改用户文件的编码。
+   */
+  let initialContent = ''
+  let initialEncoding: DocState['encoding'] = 'utf8'
+  if (initialPath && existsSync(initialPath)) {
+    try {
+      const decoded = decodeText(readFileSync(initialPath))
+      initialContent = decoded.content
+      initialEncoding = decoded.encoding
+    } catch {
+      initialContent = ''
+    }
+  }
+
   const initialState: DocState = {
     filePath: initialPath ?? null,
     dirty: false,
     title: initialPath ? basename(initialPath) : '未命名',
     content: initialContent,
+    encoding: initialEncoding,
   }
   windows.set(win.id, initialState)
+
+  // 窗口标题要带文件名，否则任务栏/资源管理器里全是「Trifluisnote」，
+  // 多开几个窗口根本分不清哪个是哪个。
+  if (initialPath) win.setTitle(`${basename(initialPath)} — Trifluisnote`)
 
   win.once('ready-to-show', () => win.show())
 

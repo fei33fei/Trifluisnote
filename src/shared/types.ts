@@ -1,5 +1,14 @@
 /** 主进程 / 预加载 / 渲染进程之间共享的类型定义。 */
 
+/**
+ * 本地文本文件的编码。
+ *
+ * `gbk` 是为了老 md 文件准备的 —— 国内用户手上「原本就有」的 md
+ * 大多是 GBK/GB18030，按 UTF-8 读会整篇乱码。
+ * 保存时按原编码写回，不改用户文件的编码。
+ */
+export type FileEncoding = 'utf8' | 'utf8bom' | 'utf16le' | 'utf16be' | 'gbk'
+
 export interface DocState {
   /** 当前文档路径；null 表示未命名文档 */
   filePath: string | null
@@ -9,12 +18,15 @@ export interface DocState {
   title: string
   /** 文档内容（打开文件时由主进程一次性下发） */
   content?: string
+  /** 当前文件的编码（保存时按它写回） */
+  encoding?: FileEncoding
 }
 
 export interface OpenResult {
   ok: boolean
   filePath?: string
   content?: string
+  encoding?: FileEncoding
   error?: string
 }
 
@@ -43,6 +55,8 @@ export interface ExportResult {
 export interface TrifluisnoteApi {
   /** 打开文件对话框并读取内容 */
   openFile(): Promise<OpenResult>
+  /** 直接读取指定路径的文件（拖放打开用；编码探测与「打开」一致） */
+  readFile(filePath: string): Promise<OpenResult>
   /** 保存到指定路径 */
   saveFile(filePath: string, content: string): Promise<SaveResult>
   /** 另存为 */

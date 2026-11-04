@@ -11,7 +11,7 @@ export interface OutlinePanelProps {
 /**
  * 大纲侧栏。
  *
- * Typora 把大纲放在侧边栏，点击标题即可跳转；
+ * 大纲放在侧边栏，点击标题即可跳转；
  * 这里的数据直接来自文档树，所以永远和正文一致。
  */
 export function OutlinePanel(props: OutlinePanelProps) {

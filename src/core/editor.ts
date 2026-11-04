@@ -1,9 +1,9 @@
 /**
  * Trifluisnote 编辑器核心层。
  *
- * 设计约束（与 Typora 逆向结论对应）：
+ * 设计约束：
  *  - 本模块不依赖 Electron、不依赖 React，只依赖 Milkdown/ProseMirror；
- *  - 对外暴露的是「用户意图」而非「按键」，对应 Typora 的 UserOp 层；
+ *  - 对外暴露的是「用户意图」而非「按键」，命令按语义分组后再映射到快捷键；
  *  - 序列化走 remark，解析走 mdast → ProseMirror doc，两者共用同一 schema；
  *  - 全部使用 Milkdown 官方宏（@milkdown/utils），不自行拼装 ProseMirror 事务。
  */
@@ -57,7 +57,7 @@ export function buildEditorFactory(options: CoreEditorOptions) {
          * Markdown 输出风格。
          *
          * remark-stringify 默认用 `*` 作为无序列表符号，而绝大多数
-         * Markdown 文件（含 Typora 保存出来的）用 `-`。不统一的话，
+         * Markdown 文件（编辑器保存出来的）用 `-`。不统一的话，
          * 用户打开 `- [ ] xxx` 的文件再保存，就会被改写成 `* [ ] xxx`，
          * 造成无意义的 diff。
          *
@@ -293,7 +293,7 @@ function collectEditableBlocks(view: EditorView): EditableBlock[] {
 /**
  * 把屏幕坐标换算成文档位置。
  *
- * Typora 的交互是：正文左右两侧的留白、正文下方的空白都属于「可点击区」，
+ * 交互约定：正文左右两侧的留白、正文下方的空白都属于「可点击区」，
  * 点下去光标落到最近的一行，而不是「点了什么也没发生」。
  *
  * ProseMirror 只处理 contenteditable 内部的事件，留白在它外面，

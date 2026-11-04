@@ -3,6 +3,8 @@ import { EditorPane, type EditorApi, type ViewMode } from './EditorPane'
 import { OutlinePanel } from './OutlinePanel'
 import { FindBar } from './FindBar'
 import { DEFAULT_THEME, THEMES } from '../shared/theme-css'
+import { encodingLabel } from '../shared/encoding'
+import type { FileEncoding } from '../shared/types'
 import type { OutlineItem } from '../core/outline'
 import type { FindMatch } from '../core/editor'
 
@@ -15,7 +17,7 @@ const WELCOME = `# Trifluisnote
 - [x] 大纲、查找替换
 - [x] 导出 HTML / PDF
 
-> 与 Typora 一样，输入 Markdown 的同时就能看到渲染结果。
+> 输入 Markdown 的同时就能看到渲染结果。
 
 \`\`\`js
 console.log('hello, trifluis')
@@ -32,6 +34,8 @@ interface DocInfo {
   filePath: string | null
   dirty: boolean
   title: string
+  /** 当前文件的编码（老 md 文件可能是 GBK） */
+  encoding: FileEncoding
 }
 
 /**
@@ -47,7 +51,12 @@ interface ExternalContent {
 
 export function App() {
   const [external, setExternal] = useState<ExternalContent>({ token: 0, content: WELCOME })
-  const [doc, setDoc] = useState<DocInfo>({ filePath: null, dirty: false, title: '未命名' })
+  const [doc, setDoc] = useState<DocInfo>({
+    filePath: null,
+    dirty: false,
+    title: '未命名',
+    encoding: 'utf8',
+  })
   const [mode, setMode] = useState<ViewMode>('wysiwyg')
   const [stats, setStats] = useState({ words: 0, chars: 0 })
   const [theme, setTheme] = useState<string>(DEFAULT_THEME)
@@ -126,6 +135,7 @@ export function App() {
       filePath: res.filePath ?? null,
       dirty: false,
       title: baseName(res.filePath ?? null),
+      encoding: res.encoding ?? 'utf8',
     }))
     dirtyRef.current = false
     await window.tfn.setDocState({ filePath: res.filePath ?? null, dirty: false })
@@ -140,7 +150,13 @@ export function App() {
     if (res.ok && res.filePath) {
       cleanRef.current = markdown
       applyDirty(false)
-      setDoc((d) => ({ ...d, filePath: res.filePath!, dirty: false, title: baseName(res.filePath!) }))
+      setDoc((d) => ({
+        ...d,
+        filePath: res.filePath!,
+        dirty: false,
+        title: baseName(res.filePath!),
+        encoding: 'utf8',
+      }))
       await window.tfn.setDocState({ filePath: res.filePath, dirty: false })
     } else if (res.error) {
       setError(res.error)
@@ -164,7 +180,7 @@ export function App() {
     userActionRef.current = true
     markdownRef.current = ''
     pushExternal('')
-    setDoc({ filePath: null, dirty: false, title: '未命名' })
+    setDoc({ filePath: null, dirty: false, title: '未命名', encoding: 'utf8' })
     dirtyRef.current = false
     void window.tfn.setDocState({ filePath: null, dirty: false, title: '未命名' })
   }, [pushExternal])
@@ -382,17 +398,28 @@ export function App() {
       if (!file) return
       // Electron 的 File 带有原生绝对路径，DOM 类型里没有
       const nativePath = (file as File & { path?: string }).path
-      const reader = new FileReader()
-      reader.onload = () => {
-        const text = String(reader.result ?? '')
+      if (!nativePath) return
+      // 交给主进程读：编码探测、绝对路径、错误提示都和「打开…」完全一致。
+      // （原来这里用 FileReader，只能按 UTF-8 读，GBK 的老文件拖进来就是乱码。）
+      void window.tfn.readFile(nativePath).then((res) => {
+        if (!res.ok) {
+          setError(res.error ?? '打开文件失败')
+          return
+        }
         userActionRef.current = true
+        const text = res.content ?? ''
         markdownRef.current = text
         pushExternal(text)
-        setDoc((d) => ({ ...d, filePath: nativePath ?? null, dirty: false, title: file.name }))
+        setDoc((d) => ({
+          ...d,
+          filePath: res.filePath ?? nativePath,
+          dirty: false,
+          title: file.name,
+          encoding: res.encoding ?? 'utf8',
+        }))
         dirtyRef.current = false
-        void window.tfn.setDocState({ filePath: nativePath ?? null, dirty: false })
-      }
-      reader.readAsText(file)
+        void window.tfn.setDocState({ filePath: res.filePath ?? nativePath, dirty: false })
+      })
     }
     window.addEventListener('dragover', onDragOver)
     window.addEventListener('drop', onDrop)
@@ -407,6 +434,17 @@ export function App() {
   useEffect(() => {
     document.documentElement.dataset.theme = theme
   }, [theme])
+
+  /**
+   * 窗口标题。
+   *
+   * 必须在渲染层设 `document.title`：页面自带 `<title>` 时，
+   * 渲染层的标题会盖掉主进程 `win.setTitle()` 的结果，
+   * 于是双击打开文件后任务栏上还是清一色「Trifluisnote」。
+   */
+  useEffect(() => {
+    document.title = doc.filePath ? `${doc.title} — Trifluisnote` : 'Trifluisnote'
+  }, [doc.title, doc.filePath])
 
   /* ---------- 快捷键（窗口内） ---------- */
 
@@ -450,7 +488,12 @@ export function App() {
         markdownRef.current = content
         pushExternal(content)
       }
-      setDoc({ filePath: state.filePath, dirty: state.dirty, title: state.title })
+      setDoc({
+        filePath: state.filePath,
+        dirty: state.dirty,
+        title: state.title,
+        encoding: state.encoding ?? 'utf8',
+      })
     })
     return () => {
       cancelled = true
@@ -548,6 +591,7 @@ export function App() {
       <footer className="tfn-statusbar">
         <span>{doc.filePath ?? '未保存到磁盘'}</span>
         <span className="tfn-statusbar__spacer" />
+        <span>{encodingLabel(doc.encoding)}</span>
         <span>{mode === 'source' ? '源码模式' : '所见即所得'}</span>
         <span>{stats.words} 字</span>
         <span>{stats.chars} 字符</span>

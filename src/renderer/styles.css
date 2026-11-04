@@ -384,7 +384,7 @@ body {
 
 /* 任务列表的样式在 shared/theme-css.ts（编辑器与导出共用） */
 
-/* 表格：让单元格内容尽量不换行，接近 Typora 的紧凑表格 */
+/* 表格：让单元格内容尽量不换行，走紧凑表格风格 */
 .tfn-editor .ProseMirror table {
   width: auto;
 }

@@ -3,7 +3,7 @@
  * 用法：node shot-app.mjs <cdpPort> <pngPath>
  */
 const port = process.argv[2] ?? '9666'
-const out = process.argv[3] ?? 'D:/Fey/Desktop/rea-typora/analysis/app-shot.png'
+const out = process.argv[3] ?? 'shot-app.png'
 const base = `http://127.0.0.1:${port}`
 
 async function waitFor(fn, timeoutMs = 30000) {
