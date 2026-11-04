@@ -1,7 +1,6 @@
 # Trifluisnote
 
-Trifluisnote —— 对 md 文件进行编辑修改的工具：一个所见即所得的 Markdown 桌面编辑器，
-功能对齐 Typora，**不需要激活码，开箱即用**。
+Trifluisnote —— 对 md 文件进行编辑修改的工具：一个所见即所得的 Markdown 桌面编辑器。
 
 > 设计依据来自开发工作区中的 `REPORT.md`（Typora 逆向结论）与 `TRIFLUISNOTE-PLAN.md`
 > （开发路线图）；这两份文档属于逆向工作区，未包含在本仓库中。
@@ -99,7 +98,7 @@ src/
 
 ## 四个踩过的坑（都写在了源码注释里）
 
-这四个都不是「Typora 有而我们没有」的功能问题，而是 Markdown 编辑器内核的共性陷阱，
+ Markdown 编辑器内核的共性陷阱，
 照着实现时很容易再踩一遍：
 
 1. **内容回灌自激循环**（`src/renderer/App.tsx`）
