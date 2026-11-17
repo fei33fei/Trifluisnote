@@ -194,11 +194,25 @@ const md2 = await readMarkdownViaSource()
 check('文档结构未持续膨胀（无自激重排）', p1 === p2, `段落数 ${p1} → ${p2}`)
 check('markdown 未被反复重写', md1 === md2, md1 === md2 ? '稳定' : '内容发生变化')
 
-/* ---------------- 3. 磁盘文件不被改写 ---------------- */
+/* ---------------- 3. 磁盘文件内容正确 ---------------- */
 
 if (mdFile) {
   const hashAfter = hashFile(mdFile)
-  check('磁盘文件未被意外改写', hashBefore === hashAfter, `${hashBefore.slice(0, 12)} → ${hashAfter.slice(0, 12)}`)
+  const disk = readFileSync(mdFile, 'utf8').replace(/^\uFEFF/, '').replace(/\s+$/, '')
+  const editor = (md2 ?? '').replace(/^\uFEFF/, '').replace(/\s+$/, '')
+  /*
+   * v0.2 起有自动保存：磁盘文件允许被改写（那是自动保存干的），
+   * 但写进去的内容必须和编辑器里的一模一样 ——
+   * 既不能丢内容，也不能把内容写两遍（那才是自激回归）。
+   */
+  check(
+    '磁盘文件内容与编辑器一致（自动保存写入）',
+    disk === editor,
+    hashBefore === hashAfter
+      ? '磁盘文件未变'
+      : `已自动保存：${hashBefore.slice(0, 12)} → ${hashAfter.slice(0, 12)}`,
+  )
+  check('内容没有重复写入', (disk.match(/# 回归测试样张/g) ?? []).length === 1)
 } else {
   console.log('SKIP  磁盘文件校验（未提供文件路径）')
 }

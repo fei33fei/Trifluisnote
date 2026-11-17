@@ -13,6 +13,11 @@ export function buildMenu(): Menu {
       label: '文件',
       submenu: [
         {
+          label: '新建标签页',
+          accelerator: 'CmdOrCtrl+T',
+          click: () => send('file.newTab'),
+        },
+        {
           label: '新建窗口',
           accelerator: 'CmdOrCtrl+N',
           click: () => send('file.newWindow'),
@@ -20,7 +25,7 @@ export function buildMenu(): Menu {
         {
           label: '新建文件',
           accelerator: 'CmdOrCtrl+Alt+N',
-          click: () => send('file.newFile'),
+          click: () => send('file.newTab'),
         },
         { type: 'separator' },
         {
@@ -39,6 +44,16 @@ export function buildMenu(): Menu {
           accelerator: 'CmdOrCtrl+Shift+S',
           click: () => send('file.saveAs'),
         },
+        {
+          label: '关闭标签页',
+          accelerator: 'CmdOrCtrl+W',
+          click: () => send('file.closeTab'),
+        },
+        {
+          label: '关闭窗口',
+          accelerator: 'CmdOrCtrl+Shift+W',
+          click: () => BrowserWindow.getFocusedWindow()?.close(),
+        },
         { type: 'separator' },
         {
           label: '导出为 HTML…',
@@ -55,10 +70,17 @@ export function buildMenu(): Menu {
         },
         { type: 'separator' },
         {
-          label: '关闭窗口',
-          accelerator: 'CmdOrCtrl+W',
-          click: () => BrowserWindow.getFocusedWindow()?.close(),
+          id: 'auto-save',
+          label: '自动保存',
+          type: 'checkbox',
+          checked: true,
+          click: (item) => {
+            // 菜单勾选状态是「结果」，真正的开关由渲染层决定后回写
+            send('settings.toggleAutoSave')
+            void item
+          },
         },
+        { type: 'separator' },
         {
           label: '退出',
           accelerator: 'CmdOrCtrl+Q',
@@ -90,6 +112,17 @@ export function buildMenu(): Menu {
     {
       label: '视图',
       submenu: [
+        {
+          label: '下一个标签页',
+          accelerator: 'CmdOrCtrl+Tab',
+          click: () => send('view.nextTab'),
+        },
+        {
+          label: '上一个标签页',
+          accelerator: 'CmdOrCtrl+Shift+Tab',
+          click: () => send('view.prevTab'),
+        },
+        { type: 'separator' },
         {
           label: '大纲',
           accelerator: 'CmdOrCtrl+Shift+O',
@@ -124,4 +157,10 @@ export function buildMenu(): Menu {
   ]
 
   return Menu.buildFromTemplate(template)
+}
+
+/** 同步「自动保存」勾选状态到菜单栏。 */
+export function setAutoSaveChecked(checked: boolean): void {
+  const item = Menu.getApplicationMenu()?.getMenuItemById('auto-save')
+  if (item) item.checked = checked
 }

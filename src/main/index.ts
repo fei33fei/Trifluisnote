@@ -2,14 +2,25 @@ import { app, BrowserWindow, Menu } from 'electron'
 import { filesFromArgv, registerIpc } from './ipc'
 import { buildMenu } from './menu'
 import { createWindow } from './windows'
+import { flushAll } from './autosave'
+import { initStartup } from './startup'
 
 /**
- * 打开一批文件：每个文件一个窗口（记事本式多窗口模型），
- * 没有文件时开一个空白窗口。
+ * 打开一批文件。
+ *
+ * v0.2 起窗口内是标签页模型：优先把文件塞进已有窗口（新开标签页），
+ * 一个窗口都没有时才开新窗口 —— 「记事本式一文件一窗口」不再是默认行为。
  */
 function openPaths(paths: string[]): void {
   if (paths.length === 0) {
     createWindow()
+    return
+  }
+  const focused = BrowserWindow.getFocusedWindow() ?? BrowserWindow.getAllWindows()[0]
+  if (focused && !focused.isDestroyed()) {
+    focused.webContents.send('menu:command', 'file.openPaths', paths)
+    if (focused.isMinimized()) focused.restore()
+    focused.focus()
     return
   }
   for (const path of paths) createWindow(path)
@@ -31,8 +42,7 @@ if (!gotLock) {
       }
       return
     }
-    const wins = files.map((file) => createWindow(file))
-    for (const win of wins) win.focus()
+    openPaths(files)
   })
 }
 
@@ -44,6 +54,9 @@ app.on('open-file', (event, filePath) => {
 
 app.whenReady().then(() => {
   app.setAppUserModelId('io.trifluisnote.app')
+  // 先判定「是不是安装后第一次启动」：这一次才允许给启动内容，
+  // 之后每次启动都只开空白页。
+  initStartup()
   registerIpc()
   Menu.setApplicationMenu(buildMenu())
 
@@ -52,6 +65,24 @@ app.whenReady().then(() => {
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow()
   })
+})
+
+/**
+ * 退出前把待落盘的内容一次性写掉。
+ *
+ * 自动保存平时是「停止输入 2 秒后写盘」，退出这一刻可能还有没写的内容；
+ * 这里补一次，保证用户按退出时磁盘上就是最新的。
+ */
+let flushed = false
+app.on('before-quit', (event) => {
+  if (flushed) return
+  event.preventDefault()
+  void flushAll()
+    .catch(() => undefined)
+    .finally(() => {
+      flushed = true
+      app.quit()
+    })
 })
 
 app.on('window-all-closed', () => {

@@ -4,7 +4,7 @@
 
 > **所见即所得的 Markdown 桌面编辑器** —— 本地、开箱即用。
 
-[![version](https://img.shields.io/badge/version-v0.1.0-2ea44f?style=flat-square)](https://github.com/fei33fei/Trifluisnote/releases)
+[![version](https://img.shields.io/badge/version-v0.2.0-2ea44f?style=flat-square)](https://github.com/fei33fei/Trifluisnote/releases)
 [![license](https://img.shields.io/badge/license-MIT-2ea44f?style=flat-square)](./LICENSE)
 ![platform](https://img.shields.io/badge/platform-Windows%20x64-0078d4?style=flat-square)
 ![electron](https://img.shields.io/badge/Electron-45-47848F?style=flat-square)
@@ -13,20 +13,32 @@
 输入 Markdown 的同时看到渲染结果，源码模式与所见即所得共用同一份文档模型。
 **纯本地运行：文件不出本机，不联网，不订阅。**
 
+> ### 🆕 v0.2 已发布
+>
+> 这一版把「能写 Markdown」推进到「能当日常主力编辑器」：
+> **窗口内标签页**（每页独立撤销栈）、**自动保存 + 崩溃恢复**（停笔 2 秒写盘，异常退出后提示恢复）、
+> **数学公式**（KaTeX 渲染，双击弹框改 LaTeX）、**图片落盘**（粘贴即存进 `assets/`，导出 HTML 自动内嵌成单文件）。
+>
+> 👉 **[⬇ 点此下载 v0.2.0 便携版](https://github.com/fei33fei/Trifluisnote/releases/download/v0.2.0/Trifluisnote-0.2.0-x64-portable.exe)**
+> ｜ [⬇ 安装版](https://github.com/fei33fei/Trifluisnote/releases/download/v0.2.0/Trifluisnote-0.2.0-x64-setup.exe)
+> ｜ [全部版本](https://github.com/fei33fei/Trifluisnote/releases)
+
 ## 目录
 
 - [为什么做这个](#为什么做这个)
 - [特性](#特性)
 - [快速开始](#快速开始)
 - [打开本地已有的 md 文件](#打开本地已有的-md-文件)
+- [v0.2 功能](#v02-功能)
 - [v0.1 功能](#v01-功能)
 - [快捷键](#快捷键)
 - [开发](#开发)
 - [架构](#架构)
 - [实现要点](#实现要点五个踩过的坑)
+- [v0.2 踩的坑](#v02-踩的坑做标签页--自动保存--图片--公式时)
 - [验证](#验证)
 - [技术选型](#技术选型)
-- [已知限制](#已知限制)
+- [已知限制](#已知限制v02)
 - [许可证](#许可证)
 
 ## 为什么做这个
@@ -46,9 +58,13 @@ Trifluisnote 是为自己写的一个编辑器，目标很直接：
 | | |
 |---|---|
 | 🖊️ **所见即所得** | 输入即渲染，`Ctrl+/` 随时切回源码模式 |
+| 🗂️ **窗口内标签页** | `Ctrl+T` 新建、`Ctrl+W` 关闭、`Ctrl+Tab` 切换，每页独立撤销栈 |
+| 💾 **自动保存 + 崩溃恢复** | 停笔 2 秒自动写盘（保持原编码），异常退出后提示恢复 |
+| 🧮 **数学公式** | `$…$` / `$$…$$` 用 KaTeX 渲染，双击弹框改 LaTeX |
+| 🖼️ **图片落盘** | 粘贴 / 拖入的图片存到 `assets/`，导出 HTML 时内嵌成单文件 |
 | 📋 **GFM 完整支持** | 表格、任务列表、删除线、自动链接 |
 | 🎨 **代码高亮** | 190+ 语言（highlight.js），主题随配色切换 |
-| 🗂️ **大纲侧栏** | `Ctrl+Shift+O` 开关，点击标题跳转 |
+| 🗒️ **大纲侧栏** | `Ctrl+Shift+O` 开关，点击标题跳转 |
 | 🔍 **查找替换** | `Ctrl+F`，支持全量替换与区分大小写 |
 | 🪟 **多窗口** | 记事本式，每窗口一个独立文档 |
 | 📤 **导出** | HTML（独立文件，带主题样式）/ PDF（A4，Chromium 排版） |
@@ -58,17 +74,23 @@ Trifluisnote 是为自己写的一个编辑器，目标很直接：
 
 ## 快速开始
 
-到 [Releases](https://github.com/fei33fei/Trifluisnote/releases) 下载 Windows 版本：
+**点下面两个链接，浏览器会直接开始下载**（Windows x64，免安装版和安装包二选一）：
 
-| 版本 | 文件 | 说明 |
+| 版本 | 点击下载 | 说明 |
 |---|---|---|
-| 便携版 | `Trifluisnote-0.1.0-x64-portable.exe` | 免安装，双击即用，适合试用 |
-| 安装版 | `Trifluisnote-0.1.0-x64-setup.exe` | NSIS 安装包，已注册 `.md` 文件关联 |
+| 🟢 **便携版** | [⬇ Trifluisnote-0.2.0-x64-portable.exe](https://github.com/fei33fei/Trifluisnote/releases/download/v0.2.0/Trifluisnote-0.2.0-x64-portable.exe) | 免安装，双击即用，适合先试用 |
+| 🔵 **安装版** | [⬇ Trifluisnote-0.2.0-x64-setup.exe](https://github.com/fei33fei/Trifluisnote/releases/download/v0.2.0/Trifluisnote-0.2.0-x64-setup.exe) | NSIS 安装包，已注册 `.md` 文件关联 |
+
+也可以打开 [Releases 页面](https://github.com/fei33fei/Trifluisnote/releases) 自己挑版本 ——
+历史版本都留在那里，每个版本都有便携版和安装包。
+
+> 下载完成后 Windows SmartScreen 可能提示「已保护你的电脑」，点「更多信息」→「仍要运行」即可
+> （未做代码签名，这是开源小工具的常态）。
 
 > `release/` 目录不入库（单个产物 100MB+，超过 GitHub 单文件上限），需要在本地复现时按
 > [开发](#开发) 一节执行 `npm run dist:portable` / `npm run dist:nsis`。
 
-也可以带上文件路径启动：
+下载完双击 exe 即可启动，也可以带上文件路径启动：
 
 ```
 Trifluisnote.exe D:\notes\my-note.md
@@ -101,6 +123,60 @@ Trifluisnote.exe D:\notes\my-note.md
 
 > 唯一例外是「另存为」——那是一个新文件，统一写成无 BOM 的 UTF-8。
 
+## v0.2 功能
+
+v0.2 解决的心问题只有一个：**让它能当日常主力编辑器用**。
+v0.1 能写，但一开多份文档就乱、忘了保存就没了、插图插不进、公式显示不出来。
+
+| 能力 | 说明 |
+|---|---|
+| 窗口内标签页 | 一个窗口开多个文档，`Ctrl+T` 新建、`Ctrl+W` 关闭、`Ctrl+Tab` 切换；每个标签页有独立编辑器（自己的撤销栈、光标、滚动位置） |
+| 自动保存 | 停止输入 2 秒后自动写盘（保持原文件编码），状态栏显示「已自动保存」；菜单「文件 → 自动保存」可开关 |
+| 崩溃恢复 | 每次改动都写一份快照到 `userData/recovery/`；异常退出后重启会提示恢复未落盘的内容 |
+| 图片落盘 | 粘贴 / 拖入的图片写到文档旁的 `assets/`，markdown 里写相对路径；导出 HTML 时图片内嵌成 data URI，单文件可直接发给别人 |
+| 数学公式 | `$…$` / `$$…$$` 由 KaTeX 渲染；双击公式弹出编辑框改 LaTeX 源码，带实时预览 |
+| 首启内容 | 安装后第一次启动给一次示例文档，之后一律空白页（重装会再给一次） |
+
+### 标签页：一个窗口开多份文档
+
+`Ctrl+T` 新建标签页，`Ctrl+W` 关闭，`Ctrl+Tab` / `Ctrl+Shift+Tab` 在标签之间循环。
+每个标签页挂的是**一个独立的编辑器实例** —— 文档内容、撤销栈、光标位置、滚动位置全都各管各的。
+
+> 为什么要这么重？多个标签页共用一个 ProseMirror 实例的话，切换标签页只是「整篇替换内容」，
+> 撤销栈里还留着上一个标签页的步骤 —— 在新标签页按 `Ctrl+Z` 会把上一个标签页的内容撤销回来。
+> 代价是内存换正确性，详见 [v0.2 踩的坑](#v02-踩的坑做标签页--自动保存--图片--公式时)。
+
+多窗口仍然保留（`Ctrl+N`），窗口和标签页两个层级并存。
+
+### 自动保存与崩溃恢复
+
+- **自动保存**：停止输入 **2 秒**后自动写盘，写回时**保持原文件编码**（GBK 文件不会被改成 UTF-8）。
+  状态栏显示「已自动保存」，菜单「文件 → 自动保存」可以随时关掉。
+- **崩溃恢复**：每次改动都会往 `userData/recovery/<sha1>.json` 写一份快照。
+  进程被强杀 / 断电之后重启，应用会提示恢复未落盘的内容；
+  快照内容与磁盘已经一致时自动静默丢弃，不打扰你。
+
+### 图片：粘贴即用，导出即带走
+
+粘贴或拖入图片 → 自动写到**当前文档旁的 `assets/` 目录**，markdown 里写相对路径：
+
+```markdown
+![截图](assets/20261117-143052.png)
+```
+
+- 相对路径 = 换台电脑、把这个文件夹拷走，链接照样有效。
+- 导出 HTML 时图片会**内嵌成 data URI**，得到一个可以直接发给别人、双击就能看的单文件。
+- 「另存为」到新目录时，图片会**搬进新目录**并自动改写相对路径。
+- 未命名文档的图片先落在应用数据目录，markdown 记绝对路径；另存为之后会迁到新目录。
+
+### 数学公式：KaTeX 渲染
+
+行内 `$E = mc^2$`、块级 `$$…$$` 都由 KaTeX 渲染。
+
+- 在所见即所得模式下，公式是一个**原子节点**，双击弹出编辑框改 LaTeX 源码，带**实时预览**。
+- 在源码模式下直接改 `$…$` 之间的文本即可。
+- 输入规则：输入 `$` 后跟内容可以直接敲出公式节点。
+
 ## v0.1 功能
 
 | 能力 | 说明 |
@@ -110,24 +186,25 @@ Trifluisnote.exe D:\notes\my-note.md
 | 代码高亮 | 190+ 语言，highlight.js 分词 |
 | 大纲侧栏 | `Ctrl+Shift+O` 开关，点击标题跳转 |
 | 查找 / 替换 | `Ctrl+F`，支持全量替换、区分大小写 |
-| 多窗口 | 记事本式：每个窗口一个独立文档，`Ctrl+N` 新建窗口 |
+| 多窗口 | `Ctrl+N` 新建独立窗口（v0.2 起窗口内是标签页模型） |
 | 导出 | HTML（带主题样式的独立文件）与 PDF（A4，Chromium 排版） |
 | 主题 | 6 套，工具栏下拉切换；浅色 / 深色各三套 |
-| 其它 | 拖放打开、中文菜单、状态栏字数统计、自动保存标题 |
+| 其它 | 拖放打开、中文菜单、状态栏字数统计 |
 
 ### 快捷键
 
 | 快捷键 | 动作 |
 |---|---|
+| `Ctrl+T` | 新建标签页 |
+| `Ctrl+W` | 关闭标签页（只剩一个时关窗口） |
+| `Ctrl+Tab` / `Ctrl+Shift+Tab` | 下一个 / 上一个标签页 |
 | `Ctrl+N` | 新建窗口 |
-| `Ctrl+Alt+N` | 新建文件（当前窗口） |
 | `Ctrl+O` | 打开 |
 | `Ctrl+S` / `Ctrl+Shift+S` | 保存 / 另存为 |
 | `Ctrl+F` | 查找替换 |
 | `Ctrl+/` | 源码 / 所见即所得切换 |
 | `Ctrl+Shift+O` | 大纲侧栏 |
 | `Ctrl+Shift+T` | 切换主题 |
-| `Ctrl+W` | 关闭窗口 |
 
 ## 开发
 
@@ -155,18 +232,26 @@ src/
 │  ├─ editor.ts     Milkdown 组装、markdown 读写、统计、查找替换、HTML 序列化
 │  ├─ highlight.ts  代码高亮（highlight.js → ProseMirror inline decoration）
 │  ├─ outline.ts    大纲提取与跳转
+│  ├─ math.ts       数学公式节点（remark-math + KaTeX + 输入规则 + 编辑接口）
+│  ├─ image.ts      图片节点（落盘 + 相对路径 ↔ file:// 解析）
 │  └─ task-list.ts  GFM 任务列表的可交互复选框（widget decoration）
 ├─ main/            Electron 主进程
-│  ├─ index.ts      单实例锁、启动、菜单装配
-│  ├─ windows.ts    窗口与文档状态（每窗口一文档）
-│  ├─ ipc.ts        文件 / 导出 / 状态 IPC
+│  ├─ index.ts      单实例锁、启动、菜单装配、退出前落盘
+│  ├─ windows.ts    窗口与标签页状态（标签页清单镜像 + 窗口标题）
+│  ├─ ipc.ts        文件 / 导出 / 状态 / 自动保存 / 图片 IPC
 │  ├─ menu.ts       中文菜单
+│  ├─ autosave.ts   自动保存队列 + 崩溃恢复快照
+│  ├─ images.ts     图片落盘（assets/）与基准目录
+│  ├─ embed.ts      图片路径识别 / 相对路径改写 / data URI 内嵌（纯逻辑）
+│  ├─ startup.ts    首启内容（安装后第一次启动给一次示例文档）
 │  ├─ encoding.ts   文件编码探测与回写（UTF-8 / BOM / UTF-16 / GBK）
 │  └─ export.ts     HTML 模板 + Chromium printToPDF
 ├─ preload/         contextBridge 暴露的 API
-├─ renderer/        React 界面（App / EditorPane / OutlinePanel / FindBar）
+├─ renderer/        React 界面（App / EditorPane / TabBar / MathDialog / OutlinePanel / FindBar）
 └─ shared/          主进程与渲染进程共用
    ├─ types.ts      IPC 类型契约
+   ├─ hash.ts       内容哈希（判断「这份内容是不是已经落盘」）
+   ├─ path.ts       少量路径处理（渲染层拿不到 node:path）
    ├─ encoding.ts   编码名显示（状态栏）
    └─ theme-css.ts  主题变量 + 文档排版 + 代码配色（渲染层与导出共用）
 ```
@@ -235,6 +320,39 @@ build/
    另外，拖放打开原来是在渲染层用 `FileReader` 读的（只有 UTF-8），
    现在统一交给主进程，避免两条路径行为不一致。
 
+## v0.2 踩的坑（做标签页 / 自动保存 / 图片 / 公式时）
+
+1. **标签页共享一个编辑器 → 撤销栈串味**
+   多个标签页共用一个 ProseMirror 实例时，切换标签页只是「整篇替换内容」，
+   撤销栈里还留着上一个标签页的步骤 —— 在新标签页按 `Ctrl+Z` 会把
+   上一个标签页的内容撤销回来，甚至把步骤应用到不相干的文档上。
+   **解法**：每个标签页挂一个**独立的编辑器实例**（`EditorPane` 一标签页一个），
+   文档、撤销栈、光标、滚动位置全都各管各的。代价是内存换正确性。
+
+2. **启动信息被第一次同步冲掉**
+   渲染层挂载后会立刻把「当前标签页清单」同步给主进程，而那时清单还是空的 ——
+   于是「用文件启动应用，标签页标题却变成『未命名』」。
+   **解法**：主进程把「启动时的状态」和「当前状态」分成两份字段，
+   启动那份**不可变**，同步只写当前那份。
+
+3. **`$remark()` 返回的是二元组，`.use()` 只摊平一层**
+   `$remark('remarkMath', () => remarkMath)` 返回 `[配置 ctx, 插件]`，
+   直接塞进 `.use([...])` 会被当成一个插件，数学公式静默不生效。
+   **解法**：`...$remark(...)` 摊平后再传。
+
+4. **源码模式下的脏标记不能用编辑器的序列化**
+   所见即所得下用 `api.getMarkdown()` 比基线是对的；
+   但源码模式下用户改的是 textarea 里的原文，编辑器还停在旧内容 ——
+   拿编辑器的序列化去比，会永远判定成「没改动」，自动保存也就不会触发。
+   **解法**：按模式分流：源码模式用载荷文本，所见即所得用实时序列化。
+
+5. **图片路径：模型里存相对路径，渲染时才解析**
+   如果把绝对路径直接写进文档模型，markdown 里就会留下 `C:/Users/...` 这种
+   换台电脑就失效的链接；如果直接把相对路径交给 DOM，编辑器里又显示不出来
+   （编辑器跑在 `file://app/index.html` 下，相对路径的基准根本不是文档目录）。
+   **解法**：模型里始终是「markdown 该写的样子」，渲染时再按文档目录解析成
+   `file://` 绝对地址（`toDOM` 里做），序列化时原样输出。
+
 ## 验证
 
 没有 GUI 自动化工具时，用 **CDP 探针**做程序化验证：
@@ -242,7 +360,7 @@ build/
 ```powershell
 # 1. 以真实 .md 启动（带调试端口）
 #    用便携版 exe：它始终是最新构建，不会像 win-unpacked 那样被运行中的实例锁住
-$exe = 'release\Trifluisnote-0.1.0-x64-portable.exe'
+$exe = 'release\Trifluisnote-0.2.0-x64-portable.exe'
 Start-Process $exe -ArgumentList @($doc, '--remote-debugging-port=9444')
 
 # 2. 探针：DOM 结构、表格、高亮 token、主题切换、查找栏、控制台错误
@@ -254,11 +372,27 @@ node tools\shot-app.mjs 9444 app-shot.png
 
 ### 回归测试
 
-两个脚本覆盖「打开文件 → 编辑 → 不保存 → 磁盘不变」这条链路，
+v0.2 新增的四个脚本（都不依赖 GUI 自动化库，走 CDP / 纯 node）：
+
+```powershell
+# v0.2 主回归：标签页 / 数学公式 / 公式编辑 / 图片落盘 / 自动保存（32 项）
+node tools\cdp-v02-test.mjs 9444 $env:TEMP\tfn-v02-test.md
+
+# 崩溃恢复：改内容 → 强杀进程 → 重启 → 提示恢复 → 恢复（6 项，自己拉起应用）
+node tools\cdp-v02-crash-test.mjs
+
+# 首启内容：干净的 userData 首次有示例文档、之后空白页（4 项）
+node tools\test-first-run.mjs
+
+# 图片路径 / 内嵌 / 迁移的纯逻辑单测（17 项）
+node tools\test-embed.mjs
+```
+
+v0.1 的两个脚本覆盖「打开文件 → 编辑 → 磁盘内容正确」这条链路，
 以及保存写回的正确性：
 
 ```powershell
-# 回归：加载 / 勾选 / 不自激 / 磁盘不被改写（14 项）
+# 回归：加载 / 勾选 / 不自激 / 磁盘内容与编辑器一致（15 项）
 node tools\cdp-regression.mjs 9444 $env:TEMP\regression-tasklist.md
 
 # 保存链路：勾选 → Ctrl+S → 磁盘写回正确（10 项）
@@ -271,7 +405,12 @@ node tools\cdp-save-test.mjs 9445 $env:TEMP\save-test-copy.md
 node tools\cdp-open-test.mjs        # 8 项：正文正确 / BOM 不残留 / GBK 不乱码 / 保存后仍是 GBK / 窗口标题带文件名
 ```
 
-开发版、`release\win-unpacked` 与便携版 exe 三者都跑过，**全部 14/14 通过**。
+> ⚠️ 跑 `verify-fixes.mjs` 这类**真实鼠标 / 键盘**的脚本时，
+> 窗口必须在前台可见：Electron 窗口被完全遮挡时 Chromium 会把页面标记成
+> `document.hidden`，`requestAnimationFrame` 与定时器一起被节流，
+> 脚本会误判成「点不动 / 打不进字」。
+
+开发版、`release\win-unpacked` 与便携版 exe 三者都跑过，**全部通过**。
 
 首轮验收的三项修复另有一个专门的回归脚本（真实鼠标事件 + 真实键盘输入）：
 
@@ -302,17 +441,18 @@ electron.exe tools\shot-export.cjs <html> <png>                    # 截图复�
 | 界面 | React 19 | — |
 | 打包 | electron-builder 26 | NSIS + 便携版双形态 |
 | 代码高亮 | highlight.js | 纯 JS、无原生依赖；分词后转成 ProseMirror decoration，文档模型保持纯净 |
+| 数学公式 | KaTeX + remark-math | Milkdown 7 的预设里没有数学节点，`remark-math` 负责 markdown 解析/序列化，KaTeX 负责渲染；两者都是纯 JS |
 | 编码转换 | iconv-lite | GBK 回写必须靠它（Node 只能解码不能编码） |
 
-## 已知限制（v0.1）
+## 已知限制（v0.2）
 
-- 数学公式（`$…$` / `$$…$$`）尚未渲染，会按纯文本显示
-- 图片以相对路径引用，导出 HTML 时不会内嵌图片
-- 无自动保存与崩溃恢复
+- 数学公式在所见即所得模式下是原子节点，不能直接编辑，要双击弹框改源码（源码模式里可以随便改）
+- 未命名文档里的图片先落在应用数据目录，markdown 记绝对路径；「另存为」之后会搬进新目录并改写成相对路径
 - 无设置持久化（主题选择每次启动回到默认）
 - 表格不支持拖拽调整列宽
 - 保存时会按 remark 的默认规则规范化排版（例如表格单元格补齐空格、
   有序列表统一编号），与部分 Markdown 工具的规范化策略不完全一致
+- 自动保存按「停止输入 2 秒」触发，磁盘内容最多比编辑器慢 2 秒
 
 ## 许可证
 

@@ -1,13 +1,28 @@
 import { existsSync, statSync } from 'node:fs'
 import { readFile, writeFile } from 'node:fs/promises'
-import { basename, extname } from 'node:path'
+import { extname } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { app, BrowserWindow, dialog, ipcMain, shell } from 'electron'
-import type { ExportPayload, ExportResult, OpenResult, SaveResult } from '../shared/types'
+import type {
+  ExportPayload,
+  ExportResult,
+  FileEncoding,
+  OpenResult,
+  SaveResult,
+  TabState,
+} from '../shared/types'
 import { THEMES } from '../shared/theme-css'
 import { buildExportHtml, renderPdf } from './export'
 import { decodeText, encodeText } from './encoding'
-import { createWindow, getDocState, patchDocState } from './windows'
+import {
+  listRecovery,
+  pushAutosave,
+  resolveRecovery,
+  setAutoSave,
+} from './autosave'
+import { setAutoSaveChecked } from './menu'
+import { baseUrlFor, embedLocalImages, migrateImages, saveImage } from './images'
+import { createWindow, findEncodingForPath, getStartupState, syncTabs } from './windows'
 
 /** Markdown 文件扩展名白名单。 */
 const MD_EXT = ['.md', '.markdown', '.mdown', '.mkd', '.mdx', '.txt']
@@ -48,17 +63,7 @@ export function registerIpc(): void {
 
     if (result.canceled || !result.filePaths[0]) return { ok: false }
 
-    const filePath = result.filePaths[0]
-    const res = await readMarkdown(filePath)
-    if (!res.ok) return res
-    patchDocState(win, {
-      filePath,
-      dirty: false,
-      title: basename(filePath),
-      encoding: res.encoding,
-    })
-    win.setTitle(`${basename(filePath)} — Trifluisnote`)
-    return res
+    return readMarkdown(result.filePaths[0])
   })
 
   /**
@@ -72,76 +77,113 @@ export function registerIpc(): void {
     if (!win) return { ok: false, error: 'no-window' }
     if (!filePath || !existsSync(filePath)) return { ok: false, error: '文件不存在' }
 
-    const res = await readMarkdown(filePath)
-    if (!res.ok) return res
-    patchDocState(win, {
-      filePath,
-      dirty: false,
-      title: basename(filePath),
-      encoding: res.encoding,
-    })
-    win.setTitle(`${basename(filePath)} — Trifluisnote`)
-    return res
+    return readMarkdown(filePath)
   })
 
-  ipcMain.handle('file:save', async (event, filePath: string, content: string): Promise<SaveResult> => {
-    const win = BrowserWindow.fromWebContents(event.sender)
-    if (!win) return { ok: false, error: 'no-window' }
-    try {
-      // 按原文件的编码写回，避免把用户的 GBK 文件悄悄改成 UTF-8
-      const encoding = getDocState(win).encoding ?? 'utf8'
-      await writeFile(filePath, encodeText(content, encoding))
-      patchDocState(win, { filePath, dirty: false, title: basename(filePath) })
-      win.setTitle(`${basename(filePath)} — Trifluisnote`)
-      return { ok: true, filePath }
-    } catch (err) {
-      return { ok: false, error: (err as Error).message }
-    }
-  })
+  ipcMain.handle(
+    'file:save',
+    async (event, filePath: string, content: string, encoding?: FileEncoding): Promise<SaveResult> => {
+      const win = BrowserWindow.fromWebContents(event.sender)
+      if (!win) return { ok: false, error: 'no-window' }
+      try {
+        // 按原文件的编码写回，避免把用户的 GBK 文件悄悄改成 UTF-8。
+        // 调用方没带编码时，按窗口里这个文件的标签页查。
+        const target = encoding ?? findEncodingForPath(win, filePath) ?? 'utf8'
+        await writeFile(filePath, encodeText(content, target))
+        return { ok: true, filePath }
+      } catch (err) {
+        return { ok: false, error: (err as Error).message }
+      }
+    },
+  )
 
-  ipcMain.handle('file:saveAs', async (event, content: string, suggestedName?: string): Promise<SaveResult> => {
-    const win = BrowserWindow.fromWebContents(event.sender)
-    if (!win) return { ok: false, error: 'no-window' }
+  ipcMain.handle(
+    'file:saveAs',
+    async (
+      event,
+      content: string,
+      suggestedName?: string,
+      encoding?: FileEncoding,
+    ): Promise<SaveResult> => {
+      const win = BrowserWindow.fromWebContents(event.sender)
+      if (!win) return { ok: false, error: 'no-window' }
 
-    const result = await dialog.showSaveDialog(win, {
-      title: '另存为',
-      defaultPath: suggestedName ?? '未命名.md',
-      filters: [{ name: 'Markdown', extensions: ['md'] }],
-    })
-    if (result.canceled || !result.filePath) return { ok: false }
-
-    try {
-      // 另存为是新文件：统一用无 BOM 的 UTF-8（现代默认，也对所有工具友好）
-      await writeFile(result.filePath, encodeText(content, 'utf8'))
-      patchDocState(win, {
-        filePath: result.filePath,
-        dirty: false,
-        title: basename(result.filePath),
-        encoding: 'utf8',
+      const result = await dialog.showSaveDialog(win, {
+        title: '另存为',
+        defaultPath: suggestedName ?? '未命名.md',
+        filters: [{ name: 'Markdown', extensions: ['md'] }],
       })
-      win.setTitle(`${basename(result.filePath)} — Trifluisnote`)
-      return { ok: true, filePath: result.filePath }
-    } catch (err) {
-      return { ok: false, error: (err as Error).message }
-    }
-  })
+      if (result.canceled || !result.filePath) return { ok: false }
+
+      try {
+        // 另存为通常意味着换了个目录：把文中指向旧位置的图片搬过去，
+        // 并改写成相对路径，文档才能自洽。
+        const migrated = await migrateImages(content, result.filePath)
+        // 另存为是新文件：统一用无 BOM 的 UTF-8（现代默认，也对所有工具友好）
+        await writeFile(result.filePath, encodeText(migrated, encoding ?? 'utf8'))
+        return { ok: true, filePath: result.filePath }
+      } catch (err) {
+        return { ok: false, error: (err as Error).message }
+      }
+    },
+  )
 
   ipcMain.handle('window:new', (): void => {
     createWindow()
   })
 
-  ipcMain.handle('docstate:get', (event) => {
+  ipcMain.handle('startup:get', (event) => {
     const win = BrowserWindow.fromWebContents(event.sender)
-    return win ? getDocState(win) : null
+    return win ? getStartupState(win) : null
   })
 
-  ipcMain.handle('docstate:set', (event, patch) => {
+  ipcMain.handle('tabs:sync', (event, tabs: TabState[], activeTabId: string) => {
     const win = BrowserWindow.fromWebContents(event.sender)
     if (!win) return null
-    const next = patchDocState(win, patch)
-    win.setTitle(`${next.title}${next.dirty ? ' •' : ''} — Trifluisnote`)
-    return next
+    syncTabs(win, tabs, activeTabId)
+    return true
   })
+
+  ipcMain.handle('autosave:push', (event, payload) => {
+    const win = BrowserWindow.fromWebContents(event.sender)
+    if (!win) return false
+    pushAutosave(payload, win.id)
+    return true
+  })
+
+  ipcMain.handle('settings:autoSave', (_event, enabled: boolean) => {
+    setAutoSave(enabled)
+    setAutoSaveChecked(enabled)
+    return true
+  })
+
+  ipcMain.handle('recovery:list', () => listRecovery())
+
+  ipcMain.handle('recovery:resolve', async (_event, id: string, action: 'restore' | 'discard') => {
+    await resolveRecovery(id, action)
+    return true
+  })
+
+  ipcMain.handle('dialog:confirm', async (event, message: string, detail?: string) => {
+    const win = BrowserWindow.fromWebContents(event.sender)
+    const options = {
+      type: 'warning' as const,
+      buttons: ['确定', '取消'],
+      defaultId: 0,
+      cancelId: 1,
+      title: 'Trifluisnote',
+      message,
+      detail,
+    }
+    const result = win
+      ? await dialog.showMessageBox(win, options)
+      : await dialog.showMessageBox(options)
+    return result.response === 0
+  })
+
+  ipcMain.handle('image:save', async (_event, request) => saveImage(request))
+
+  ipcMain.handle('image:baseUrl', (_event, filePath: string | null) => baseUrlFor(filePath))
 
   ipcMain.handle('app:info', () => ({
     name: app.getName(),
@@ -157,44 +199,52 @@ export function registerIpc(): void {
 
   ipcMain.handle('theme:list', () => THEMES)
 
-  ipcMain.handle('export:html', async (event, payload: ExportPayload, suggestedName: string): Promise<ExportResult> => {
-    const win = BrowserWindow.fromWebContents(event.sender)
-    if (!win) return { ok: false, error: 'no-window' }
+  ipcMain.handle(
+    'export:html',
+    async (event, payload: ExportPayload, suggestedName: string): Promise<ExportResult> => {
+      const win = BrowserWindow.fromWebContents(event.sender)
+      if (!win) return { ok: false, error: 'no-window' }
 
-    const result = await dialog.showSaveDialog(win, {
-      title: '导出为 HTML',
-      defaultPath: suggestedName,
-      filters: [{ name: 'HTML 网页', extensions: ['html'] }],
-    })
-    if (result.canceled || !result.filePath) return { ok: false, canceled: true }
+      const result = await dialog.showSaveDialog(win, {
+        title: '导出为 HTML',
+        defaultPath: suggestedName,
+        filters: [{ name: 'HTML 网页', extensions: ['html'] }],
+      })
+      if (result.canceled || !result.filePath) return { ok: false, canceled: true }
 
-    try {
-      await writeFile(result.filePath, buildExportHtml(payload), 'utf8')
-      return { ok: true, filePath: result.filePath }
-    } catch (err) {
-      return { ok: false, error: (err as Error).message }
-    }
-  })
+      try {
+        const html = await embedLocalImages(payload.html, payload.baseDir ?? null)
+        await writeFile(result.filePath, buildExportHtml({ ...payload, html }), 'utf8')
+        return { ok: true, filePath: result.filePath }
+      } catch (err) {
+        return { ok: false, error: (err as Error).message }
+      }
+    },
+  )
 
-  ipcMain.handle('export:pdf', async (event, payload: ExportPayload, suggestedName: string): Promise<ExportResult> => {
-    const win = BrowserWindow.fromWebContents(event.sender)
-    if (!win) return { ok: false, error: 'no-window' }
+  ipcMain.handle(
+    'export:pdf',
+    async (event, payload: ExportPayload, suggestedName: string): Promise<ExportResult> => {
+      const win = BrowserWindow.fromWebContents(event.sender)
+      if (!win) return { ok: false, error: 'no-window' }
 
-    const result = await dialog.showSaveDialog(win, {
-      title: '导出为 PDF',
-      defaultPath: suggestedName,
-      filters: [{ name: 'PDF 文档', extensions: ['pdf'] }],
-    })
-    if (result.canceled || !result.filePath) return { ok: false, canceled: true }
+      const result = await dialog.showSaveDialog(win, {
+        title: '导出为 PDF',
+        defaultPath: suggestedName,
+        filters: [{ name: 'PDF 文档', extensions: ['pdf'] }],
+      })
+      if (result.canceled || !result.filePath) return { ok: false, canceled: true }
 
-    try {
-      const buffer = await renderPdf(payload)
-      await writeFile(result.filePath, buffer)
-      return { ok: true, filePath: result.filePath }
-    } catch (err) {
-      return { ok: false, error: (err as Error).message }
-    }
-  })
+      try {
+        const html = await embedLocalImages(payload.html, payload.baseDir ?? null)
+        const buffer = await renderPdf({ ...payload, html })
+        await writeFile(result.filePath, buffer)
+        return { ok: true, filePath: result.filePath }
+      } catch (err) {
+        return { ok: false, error: (err as Error).message }
+      }
+    },
+  )
 }
 
 /**

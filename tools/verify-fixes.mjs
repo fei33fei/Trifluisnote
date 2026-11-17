@@ -223,11 +223,18 @@ await sleep(600)
 
 // 切到源码模式，打一行
 const srcBtn = await evaluate(`(() => {
+  // 上一次跑完可能停在源码模式，先统一回到所见即所得
+  const back = [...document.querySelectorAll('.tfn-toolbar .tfn-btn')]
+    .find((b) => b.textContent.trim() === '所见即所得')
+  if (back) back.click()
+
   const btn = [...document.querySelectorAll('.tfn-toolbar .tfn-btn')]
     .find((b) => b.textContent.trim() === '源码模式')
+  if (!btn) return null
   const r = btn.getBoundingClientRect()
   return { x: r.x + r.width / 2, y: r.y + r.height / 2 }
 })()`)
+await sleep(300)
 await click(srcBtn.x, srcBtn.y)
 await typeText('一行测试')
 await click(srcBtn.x, srcBtn.y) // 切回所见即所得

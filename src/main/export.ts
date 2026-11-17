@@ -11,15 +11,9 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { BrowserWindow } from 'electron'
 import { THEME_CSS } from '../shared/theme-css'
+import type { ExportPayload } from '../shared/types'
 
-export interface ExportPayload {
-  /** 渲染层产出的正文 HTML */
-  html: string
-  /** 主题 id，对应 theme-css.ts 里的 THEMES */
-  theme: string
-  /** 文档标题（<title> 与 PDF 元数据） */
-  title: string
-}
+export type { ExportPayload }
 
 function escapeHtml(raw: string): string {
   return raw
@@ -43,6 +37,7 @@ html, body { margin: 0; padding: 0; }
 body { padding: 48px 24px; }
 .tfn-doc { max-width: 860px; margin: 0 auto; }
 ${THEME_CSS}
+${payload.extraCss ?? ''}
 @media print {
   body { padding: 0; }
   .tfn-doc { max-width: none; }

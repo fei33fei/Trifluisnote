@@ -180,12 +180,154 @@ body {
   display: flex;
 }
 
+/*
+ * 编辑区宿主：每个标签页一个绝对定位的滚动层。
+ *
+ * 这样每个标签页各自保有滚动位置，切换回来还在原来那一行；
+ * 隐藏的标签页用 display:none 收起（编辑器实例保留，撤销栈也在）。
+ */
 .tfn-editor-host {
   flex: 1;
   min-width: 0;
   min-height: 0;
-  overflow-y: auto;
+  position: relative;
+  overflow: hidden;
   cursor: text;
+}
+
+.tfn-editor-pane {
+  position: absolute;
+  inset: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+}
+
+.tfn-editor-pane.is-hidden {
+  display: none;
+}
+
+/* ---------- 标签栏 ---------- */
+
+.tfn-tabbar {
+  display: flex;
+  align-items: stretch;
+  gap: 2px;
+  flex: none;
+  height: 28px;
+  padding: 0 6px;
+  border-bottom: 1px solid var(--tfn-border);
+  background: var(--tfn-bg-soft);
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: none;
+}
+
+.tfn-tabbar::-webkit-scrollbar {
+  height: 0;
+}
+
+.tfn-tab {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: none;
+  max-width: 220px;
+  padding: 0 6px 0 10px;
+  border-right: 1px solid var(--tfn-border);
+  font-size: 12px;
+  color: var(--tfn-fg-muted);
+  cursor: pointer;
+  user-select: none;
+}
+
+.tfn-tab:hover {
+  background: var(--tfn-accent-soft);
+}
+
+.tfn-tab.is-active {
+  background: var(--tfn-bg);
+  color: var(--tfn-fg);
+  box-shadow: inset 0 -2px 0 var(--tfn-accent);
+}
+
+.tfn-tab__title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tfn-tab__dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--tfn-accent);
+  flex: none;
+}
+
+.tfn-tab__close {
+  border: none;
+  background: transparent;
+  color: inherit;
+  font-size: 14px;
+  line-height: 1;
+  padding: 0 2px;
+  cursor: pointer;
+  border-radius: 3px;
+  flex: none;
+}
+
+.tfn-tab__close:hover {
+  background: var(--tfn-border);
+}
+
+.tfn-tab__new {
+  border: none;
+  background: transparent;
+  color: var(--tfn-fg-muted);
+  font-size: 15px;
+  line-height: 1;
+  padding: 0 8px;
+  cursor: pointer;
+  flex: none;
+}
+
+.tfn-tab__new:hover {
+  background: var(--tfn-accent-soft);
+}
+
+/* ---------- 崩溃恢复提示条 ---------- */
+
+.tfn-recovery {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+  flex: none;
+  padding: 6px 10px;
+  border-bottom: 1px solid var(--tfn-border);
+  background: var(--tfn-accent-soft);
+  font-size: 12px;
+}
+
+.tfn-recovery__title {
+  font-weight: 600;
+}
+
+.tfn-recovery__item {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 6px;
+  border: 1px solid var(--tfn-border);
+  border-radius: 6px;
+  background: var(--tfn-bg);
+}
+
+.tfn-recovery__name {
+  max-width: 220px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 /* ---------- 大纲 ---------- */
@@ -441,4 +583,90 @@ body {
   box-shadow: 0 6px 20px rgb(0 0 0 / 18%);
   cursor: pointer;
   z-index: 20;
+}
+
+/* ---------- 公式编辑框 ---------- */
+
+.tfn-modal {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgb(0 0 0 / 28%);
+  z-index: 40;
+}
+
+.tfn-modal__panel {
+  width: min(560px, 90vw);
+  padding: 14px 16px 12px;
+  border-radius: 10px;
+  background: var(--tfn-bg);
+  border: 1px solid var(--tfn-border);
+  box-shadow: 0 18px 48px rgb(0 0 0 / 26%);
+}
+
+.tfn-modal__title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--tfn-fg-muted);
+  margin-bottom: 8px;
+}
+
+.tfn-modal__input {
+  width: 100%;
+  min-height: 92px;
+  padding: 8px 10px;
+  border: 1px solid var(--tfn-border);
+  border-radius: 6px;
+  background: var(--tfn-bg);
+  color: var(--tfn-fg);
+  font-family: var(--tfn-font-mono);
+  font-size: 13px;
+  line-height: 1.6;
+  resize: vertical;
+  outline: none;
+}
+
+.tfn-modal__input:focus {
+  border-color: var(--tfn-accent);
+}
+
+.tfn-modal__preview {
+  margin-top: 10px;
+  padding: 12px;
+  min-height: 48px;
+  border: 1px dashed var(--tfn-border);
+  border-radius: 6px;
+  background: var(--tfn-bg-soft);
+  overflow-x: auto;
+}
+
+.tfn-modal__actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+/* ---------- 数学公式 ---------- */
+
+.tfn-math--inline {
+  display: inline-block;
+  vertical-align: middle;
+  padding: 0 2px;
+  cursor: pointer;
+}
+
+.tfn-math--block {
+  display: block;
+  margin: 12px 0;
+  text-align: center;
+  cursor: pointer;
+}
+
+.tfn-math--inline:hover,
+.tfn-math--block:hover {
+  background: var(--tfn-accent-soft);
+  border-radius: 4px;
 }

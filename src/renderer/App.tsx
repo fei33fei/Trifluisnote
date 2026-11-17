@@ -2,61 +2,38 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { EditorPane, type EditorApi, type ViewMode } from './EditorPane'
 import { OutlinePanel } from './OutlinePanel'
 import { FindBar } from './FindBar'
+import { TabBar } from './TabBar'
+import { MathDialog } from './MathDialog'
 import { DEFAULT_THEME, THEMES } from '../shared/theme-css'
 import { encodingLabel } from '../shared/encoding'
-import type { FileEncoding } from '../shared/types'
+import { basename, dirname } from '../shared/path'
+import { hashString } from '../shared/hash'
+import { createImageUploader, resolveImageSrc } from '../core/image'
+import { KATEX_CSS } from './katex-css'
+import type { RecoveryItem, TabState } from '../shared/types'
 import type { OutlineItem } from '../core/outline'
 import type { FindMatch } from '../core/editor'
+import type { MathNodeRef } from '../core/math'
 
-const WELCOME = `# Trifluisnote
-
-欢迎使用 **Trifluisnote** —— 一个所见即所得的 Markdown 桌面编辑器。
-
-- [x] 表格、任务列表、删除线（GFM）
-- [x] 代码高亮
-- [x] 大纲、查找替换
-- [x] 导出 HTML / PDF
-
-> 输入 Markdown 的同时就能看到渲染结果。
-
-\`\`\`js
-console.log('hello, trifluis')
-\`\`\`
-
-| 功能 | 状态 | 备注 |
-| --- | --- | --- |
-| 所见即所得 | ✅ | ProseMirror + remark |
-| 多窗口 | ✅ | 记事本式 |
-| 导出 PDF | ✅ | Chromium printToPDF |
-`
-
-interface DocInfo {
-  filePath: string | null
-  dirty: boolean
-  title: string
-  /** 当前文件的编码（老 md 文件可能是 GBK） */
-  encoding: FileEncoding
+/** 一个标签页（窗口内的一个文档）。 */
+interface TabModel extends TabState {
+  /** 最近一次从编辑器读到的内容 */
+  content: string
+  /** 「未保存」基线：最近一次保存 / 打开时的内容 */
+  clean: string
+  /** 最近一次自动保存落盘的时间 */
+  savedAt?: number
 }
 
-/**
- * 外部内容（打开文件 / 新建文件）与它的版本号。
- *
- * 版本号是必需的：内容完全相同时 React 不会重新执行 effect，
- * 而「重新打开同一个文件」必须真的把编辑器复位。
- */
-interface ExternalContent {
-  token: number
-  content: string
+let tabSeq = 0
+function newTabId(): string {
+  tabSeq += 1
+  return `tab-${Date.now().toString(36)}-${tabSeq}`
 }
 
 export function App() {
-  const [external, setExternal] = useState<ExternalContent>({ token: 0, content: WELCOME })
-  const [doc, setDoc] = useState<DocInfo>({
-    filePath: null,
-    dirty: false,
-    title: '未命名',
-    encoding: 'utf8',
-  })
+  const [tabs, setTabs] = useState<TabModel[]>([])
+  const [activeId, setActiveId] = useState('')
   const [mode, setMode] = useState<ViewMode>('wysiwyg')
   const [stats, setStats] = useState({ words: 0, chars: 0 })
   const [theme, setTheme] = useState<string>(DEFAULT_THEME)
@@ -64,200 +41,325 @@ export function App() {
   const [outline, setOutline] = useState<OutlineItem[]>([])
   const [outlineOpen, setOutlineOpen] = useState(false)
   const [findOpen, setFindOpen] = useState(false)
+  const [recovery, setRecovery] = useState<RecoveryItem[]>([])
+  const [mathEdit, setMathEdit] = useState<MathNodeRef | null>(null)
+  const [autoSave, setAutoSave] = useState(true)
 
-  const apiRef = useRef<EditorApi | null>(null)
-  const dirtyRef = useRef(false)
-  const matchesRef = useRef<FindMatch[]>([])
+  /** 每个标签页的编辑器接口。 */
+  const apisRef = useRef(new Map<string, EditorApi>())
+  /** 每个标签页的大纲 / 统计（切换标签页时直接取用）。 */
+  const outlinesRef = useRef(new Map<string, OutlineItem[]>())
+  const statsRef = useRef(new Map<string, { words: number; chars: number }>())
+  /** 每个标签页的图片基准目录（file:// 前缀）。 */
+  const baseUrlsRef = useRef(new Map<string, string>())
+  /** 自动保存的防抖定时器。 */
+  const autosaveTimersRef = useRef(new Map<string, number>())
 
-  /**
-   * 文档当前内容。
-   *
-   * 用 ref 而不是 state —— 这是修掉「content 反馈回路」的关键。
-   *
-   * 曾经的写法是：编辑器的 `markdownUpdated` → `setContent(markdown)` →
-   * EditorPane 的 effect 发现 `content !== readMarkdown(editor)` →
-   * 整篇 `replaceAll` → 再次触发 `markdownUpdated` → 无限自激。
-   *
-   * 之所以不相等，是因为 `markdownUpdated` 的载荷是防抖回调里
-   * `latestTr.doc` 的序列化结果，**不包含 `appendTransaction` 的产物**
-   * （例如 trailing 插件补的空段落）；而 `readMarkdown(editor)` 读的是
-   * 当前 state，两者天然可能不一致。于是每 200ms 就整篇重写一次文档，
-   * 表现为勾选被回滚、结构被反复重排。
-   *
-   * 现在：编辑器的变化只写 ref（单向），只有「打开文件 / 新建」这类
-   * 真正的外部替换才会回到 state 并推给编辑器。
-   */
-  const markdownRef = useRef(WELCOME)
-
-  /** 「未修改」基线：最近一次打开 / 保存时的文档内容，用于计算脏标记。 */
-  const cleanRef = useRef(WELCOME)
-
-  /** 用户是否已经主动操作过文档（用于忽略首屏的异步回填）。 */
-  const userActionRef = useRef(false)
-
-  const modeRef = useRef<ViewMode>('wysiwyg')
+  const tabsRef = useRef(tabs)
+  tabsRef.current = tabs
+  const activeRef = useRef(activeId)
+  activeRef.current = activeId
+  /** 当前视图模式：源码模式下「用户改的就是原始文本」。 */
+  const modeRef = useRef<ViewMode>(mode)
   modeRef.current = mode
 
-  /** 当前文档内容（所见即所得下取实时序列化，源码模式下取原始文本）。 */
-  const currentMarkdown = useCallback(() => {
-    if (modeRef.current === 'source') return markdownRef.current
-    return apiRef.current?.getMarkdown() ?? markdownRef.current
+  const matchesRef = useRef<FindMatch[]>([])
+
+  /* ---------- 标签页 ---------- */
+
+  const createTab = useCallback(
+    async (init: Partial<TabModel> & { content?: string } = {}) => {
+      const id = newTabId()
+      // 图片基准目录要先拿到再挂编辑器：
+      // 文档里的相对路径（assets/x.png）只有在知道文档目录的情况下
+      // 才能解析成能显示的 file:// 地址，否则首屏就是一片裂图。
+      const url = await window.tfn.baseUrl(init.filePath ?? null)
+      baseUrlsRef.current.set(id, url)
+
+      const content = init.content ?? ''
+      const tab: TabModel = {
+        id,
+        filePath: init.filePath ?? null,
+        title: init.title ?? '未命名',
+        encoding: init.encoding ?? 'utf8',
+        dirty: init.dirty ?? false,
+        content,
+        clean: init.clean ?? content,
+      }
+      setTabs((prev) => [...prev, tab])
+      setActiveId(id)
+      return id
+    },
+    [],
+  )
+
+  /** 切到某个标签页（同时把大纲、统计切过去）。 */
+  const selectTab = useCallback((id: string) => {
+    // 切走之前先把上一个标签页的内容推给主进程：
+    // 它的防抖还没到，别让磁盘内容落后太多
+    const previous = tabsRef.current.find((t) => t.id === activeRef.current)
+    if (previous?.dirty && previous.id !== id) {
+      void window.tfn.autosavePush({
+        tabId: previous.id,
+        filePath: previous.filePath,
+        title: previous.title,
+        encoding: previous.encoding,
+        content: previous.content,
+      })
+    }
+
+    setActiveId(id)
+    setOutline(outlinesRef.current.get(id) ?? [])
+    setStats(statsRef.current.get(id) ?? { words: 0, chars: 0 })
+    requestAnimationFrame(() => apisRef.current.get(id)?.focus())
   }, [])
 
-  /** 统一的脏标记更新。 */
-  const applyDirty = useCallback((dirty: boolean) => {
-    if (dirtyRef.current === dirty) return
-    dirtyRef.current = dirty
-    setDoc((d) => ({ ...d, dirty }))
-    void window.tfn.setDocState({ dirty })
-  }, [])
+  const closeTab = useCallback(
+    async (id: string) => {
+      const list = tabsRef.current
+      const tab = list.find((t) => t.id === id)
+      if (!tab) return
 
-  /** 把一份新的外部内容推给编辑器（单向通道）。 */
-  const pushExternal = useCallback((content: string) => {
-    setExternal((prev) => ({ token: prev.token + 1, content }))
-  }, [])
+      if (tab.dirty) {
+        const ok = await window.tfn.confirm(
+          `「${tab.title}」有未保存的改动`,
+          '关闭这个标签页会丢掉还没写进磁盘的内容。已经自动保存过的部分不受影响。',
+        )
+        if (!ok) return
+      }
+
+      const index = list.findIndex((t) => t.id === id)
+      const next = list.filter((t) => t.id !== id)
+
+      const timer = autosaveTimersRef.current.get(id)
+      if (timer) window.clearTimeout(timer)
+      autosaveTimersRef.current.delete(id)
+      apisRef.current.delete(id)
+      outlinesRef.current.delete(id)
+      statsRef.current.delete(id)
+      baseUrlsRef.current.delete(id)
+
+      setTabs(next)
+      if (next.length === 0) {
+        // 不留一个空窗口：自动补一个空白标签页
+        createTab()
+        return
+      }
+      if (activeRef.current === id) {
+        const fallback = next[Math.min(index, next.length - 1)]
+        setActiveId(fallback.id)
+        setOutline(outlinesRef.current.get(fallback.id) ?? [])
+        setStats(statsRef.current.get(fallback.id) ?? { words: 0, chars: 0 })
+      }
+    },
+    [createTab],
+  )
 
   /* ---------- 文件操作 ---------- */
 
-  const handleOpen = useCallback(async () => {
-    const res = await window.tfn.openFile()
-    if (!res.ok) return
-    if (res.error) {
-      setError(res.error)
+  const openFile = useCallback(
+    async (filePath?: string) => {
+      const res = filePath ? await window.tfn.readFile(filePath) : await window.tfn.openFile()
+      if (!res.ok) {
+        if (res.error) setError(res.error)
+        return
+      }
+      const path = res.filePath ?? null
+      // 已经开着的文件就直接切过去，不要开两个标签页
+      const existing = tabsRef.current.find((t) => t.filePath && path && t.filePath === path)
+      if (existing) {
+        selectTab(existing.id)
+        return
+      }
+      createTab({
+        filePath: path,
+        title: path ? basename(path) : '未命名',
+        encoding: res.encoding ?? 'utf8',
+        content: res.content ?? '',
+      })
+    },
+    [createTab, selectTab],
+  )
+
+  const saveTab = useCallback(async (id: string, saveAs = false) => {
+    const tab = tabsRef.current.find((t) => t.id === id)
+    const api = apisRef.current.get(id)
+    if (!tab || !api) return
+
+    const markdown = api.getMarkdown()
+
+    if (!tab.filePath || saveAs) {
+      const suggested = tab.title.endsWith('.md') ? tab.title : `${tab.title}.md`
+      const res = await window.tfn.saveFileAs(markdown, suggested, tab.encoding)
+      if (!res.ok || !res.filePath) {
+        if (res.error) setError(res.error)
+        return
+      }
+      const path = res.filePath
+      // 主进程可能把图片搬到了新目录并改写了路径，
+      // 这里把落盘后的内容读回来同步给编辑器，保证两边一致。
+      const back = await window.tfn.readFile(path)
+      const content = back.ok && back.content !== undefined ? back.content : markdown
+      api.setMarkdown(content)
+      setTabs((prev) =>
+        prev.map((t) =>
+          t.id !== id
+            ? t
+            : {
+                ...t,
+                filePath: path,
+                title: basename(path),
+                encoding: 'utf8',
+                content,
+                clean: content,
+                dirty: false,
+              },
+        ),
+      )
+      void window.tfn.baseUrl(path).then((url) => baseUrlsRef.current.set(id, url))
       return
     }
-    userActionRef.current = true
-    const content = res.content ?? ''
-    markdownRef.current = content
-    pushExternal(content)
-    setDoc((d) => ({
-      ...d,
-      filePath: res.filePath ?? null,
-      dirty: false,
-      title: baseName(res.filePath ?? null),
-      encoding: res.encoding ?? 'utf8',
-    }))
-    dirtyRef.current = false
-    await window.tfn.setDocState({ filePath: res.filePath ?? null, dirty: false })
-  }, [pushExternal])
 
-  const handleSaveAs = useCallback(async () => {
-    const markdown = currentMarkdown()
-    const res = await window.tfn.saveFileAs(
-      markdown,
-      doc.title.endsWith('.md') ? doc.title : `${doc.title}.md`,
-    )
-    if (res.ok && res.filePath) {
-      cleanRef.current = markdown
-      applyDirty(false)
-      setDoc((d) => ({
-        ...d,
-        filePath: res.filePath!,
-        dirty: false,
-        title: baseName(res.filePath!),
-        encoding: 'utf8',
-      }))
-      await window.tfn.setDocState({ filePath: res.filePath, dirty: false })
-    } else if (res.error) {
-      setError(res.error)
-    }
-  }, [currentMarkdown, doc.title, applyDirty])
-
-  const handleSave = useCallback(async () => {
-    const markdown = currentMarkdown()
-    if (!doc.filePath) return handleSaveAs()
-    const res = await window.tfn.saveFile(doc.filePath, markdown)
-    if (res.ok) {
-      cleanRef.current = markdown
-      applyDirty(false)
-      await window.tfn.setDocState({ dirty: false })
-    } else {
+    const res = await window.tfn.saveFile(tab.filePath, markdown, tab.encoding)
+    if (!res.ok) {
       setError(res.error ?? '保存失败')
+      return
     }
-  }, [doc.filePath, currentMarkdown, handleSaveAs, applyDirty])
+    setTabs((prev) =>
+      prev.map((t) =>
+        t.id !== id ? t : { ...t, content: markdown, clean: markdown, dirty: false },
+      ),
+    )
+  }, [])
 
-  const handleNewFile = useCallback(() => {
-    userActionRef.current = true
-    markdownRef.current = ''
-    pushExternal('')
-    setDoc({ filePath: null, dirty: false, title: '未命名', encoding: 'utf8' })
-    dirtyRef.current = false
-    void window.tfn.setDocState({ filePath: null, dirty: false, title: '未命名' })
-  }, [pushExternal])
+  /* ---------- 自动保存 ---------- */
 
-  const handleNewWindow = useCallback(() => {
-    void window.tfn.newWindow()
+  const pushAutosave = useCallback((id: string) => {
+    const tab = tabsRef.current.find((t) => t.id === id)
+    if (!tab) return
+    void window.tfn.autosavePush({
+      tabId: id,
+      filePath: tab.filePath,
+      title: tab.title,
+      encoding: tab.encoding,
+      content: tab.content,
+    })
+  }, [])
+
+  /**
+   * 内容变化后的自动保存推送。
+   *
+   * 渲染层只做「延迟一会儿再推」，真正的落盘节奏由主进程控制
+   * （停止输入 2 秒后写盘），这里只是避免每个按键都往主进程塞全文。
+   */
+  const scheduleAutosave = useCallback(
+    (id: string) => {
+      const existing = autosaveTimersRef.current.get(id)
+      if (existing) window.clearTimeout(existing)
+      const timer = window.setTimeout(() => {
+        autosaveTimersRef.current.delete(id)
+        pushAutosave(id)
+      }, 1500)
+      autosaveTimersRef.current.set(id, timer)
+    },
+    [pushAutosave],
+  )
+
+  useEffect(() => {
+    const off = window.tfn.onAutosave((event) => {
+      if (event.state === 'saved' && event.hash) {
+        setTabs((prev) =>
+          prev.map((t) => {
+            if (t.id !== event.tabId) return t
+            // 内容在落盘之后又变了 → 还是脏的
+            if (hashString(t.content) !== event.hash) return t
+            return { ...t, clean: t.content, dirty: false, savedAt: event.at }
+          }),
+        )
+      } else if (event.state === 'error') {
+        setError(`自动保存失败：${event.error ?? '未知错误'}`)
+      }
+    })
+    return off
+  }, [])
+
+  /* ---------- 内容变化 ---------- */
+
+  const handleChange = useCallback(
+    (tabId: string, markdown: string) => {
+      // 源码模式下用户改的就是原始文本，直接用载荷；
+      // 所见即所得模式下要用编辑器的实时序列化 ——
+      // 防抖回调里的载荷不一定包含 appendTransaction 的产物
+      // （trailing 补的空段落等），拿它和基线比会误判成「已修改」。
+      const api = apisRef.current.get(tabId)
+      const current = modeRef.current === 'source' ? markdown : api?.getMarkdown() ?? markdown
+      setTabs((prev) =>
+        prev.map((t) =>
+          t.id !== tabId ? t : { ...t, content: current, dirty: current !== t.clean },
+        ),
+      )
+      scheduleAutosave(tabId)
+    },
+    [scheduleAutosave],
+  )
+
+  /**
+   * 编辑器已应用完初始内容。
+   *
+   * 用规范化后的内容当「未修改」基线：文件里的原文和 remark 往返之后
+   * 未必一字不差，不对齐基线的话，一打开文档就被标成「已修改」。
+   */
+  const handleApplied = useCallback((tabId: string, canonical: string) => {
+    setTabs((prev) =>
+      prev.map((t) =>
+        t.id !== tabId ? t : { ...t, content: canonical, clean: canonical, dirty: false },
+      ),
+    )
+  }, [])
+
+  const handleStats = useCallback((tabId: string, value: { words: number; chars: number }) => {
+    statsRef.current.set(tabId, value)
+    if (tabId === activeRef.current) setStats(value)
+  }, [])
+
+  const handleOutline = useCallback((tabId: string, items: OutlineItem[]) => {
+    outlinesRef.current.set(tabId, items)
+    if (tabId === activeRef.current) setOutline(items)
   }, [])
 
   /* ---------- 导出 ---------- */
 
   const exportPayload = useCallback(
-    () => ({
-      html: apiRef.current?.getRenderedHtml() ?? '',
-      theme,
-      title: doc.title,
-    }),
-    [theme, doc.title],
+    () => {
+      const tab = tabsRef.current.find((t) => t.id === activeRef.current)
+      const api = apisRef.current.get(activeRef.current)
+      return {
+        html: api?.getRenderedHtml() ?? '',
+        theme,
+        title: tab?.title ?? '未命名',
+        extraCss: KATEX_CSS,
+        baseDir: tab?.filePath ? dirname(tab.filePath) : null,
+      }
+    },
+    [theme],
   )
 
   const handleExportHtml = useCallback(async () => {
-    const base = doc.title.replace(/\.md$/i, '') || '未命名'
+    const tab = tabsRef.current.find((t) => t.id === activeRef.current)
+    const base = (tab?.title ?? '未命名').replace(/\.md$/i, '') || '未命名'
     const res = await window.tfn.exportHtml(exportPayload(), `${base}.html`)
     if (!res.ok && res.error) setError(res.error)
-  }, [exportPayload, doc.title])
+  }, [exportPayload])
 
   const handleExportPdf = useCallback(async () => {
-    const base = doc.title.replace(/\.md$/i, '') || '未命名'
+    const tab = tabsRef.current.find((t) => t.id === activeRef.current)
+    const base = (tab?.title ?? '未命名').replace(/\.md$/i, '') || '未命名'
     const res = await window.tfn.exportPdf(exportPayload(), `${base}.pdf`)
     if (!res.ok && res.error) setError(res.error)
-  }, [exportPayload, doc.title])
-
-  /* ---------- 内容变化 ---------- */
-
-  /**
-   * 编辑器内容变化。
-   *
-   * `payload` 是防抖回调里的序列化结果，可能不含 `appendTransaction` 的产物，
-   * 所以脏标记一律以「当前 state 的实时序列化」为准，避免误判。
-   */
-  const handleChange = useCallback(
-    (payload: string) => {
-      if (modeRef.current === 'source') {
-        // 源码模式：载荷就是原始文本
-        markdownRef.current = payload
-        applyDirty(payload !== cleanRef.current)
-        return
-      }
-      const current = apiRef.current?.getMarkdown() ?? payload
-      markdownRef.current = current
-      applyDirty(current !== cleanRef.current)
-    },
-    [applyDirty],
-  )
-
-  /**
-   * 外部内容已应用。
-   *
-   * 此时编辑器里的内容就是「刚打开」的状态，把基线对齐过去，
-   * 免得程序化替换被当成用户改动（进而把文件标记成已修改）。
-   */
-  const handleApplied = useCallback(
-    (canonical: string) => {
-      markdownRef.current = canonical
-      cleanRef.current = canonical
-      applyDirty(false)
-    },
-    [applyDirty],
-  )
+  }, [exportPayload])
 
   /* ---------- 查找替换 ---------- */
 
-  /**
-   * 查找栏开合。
-   *
-   * 工具栏上的「查找」按钮是开关：点一下展开，再点一下收起。
-   * Ctrl+F / 菜单里的「查找…」则是「确保展开」，不取反。
-   */
   const toggleFind = useCallback(() => {
     setFindOpen((v) => !v)
   }, [])
@@ -277,12 +379,12 @@ export function App() {
    */
   useEffect(() => {
     if (findOpen) return
-    const id = requestAnimationFrame(() => apiRef.current?.focus())
+    const id = requestAnimationFrame(() => apisRef.current.get(activeRef.current)?.focus())
     return () => cancelAnimationFrame(id)
   }, [findOpen])
 
   const handleSearch = useCallback((needle: string, caseSensitive: boolean) => {
-    const api = apiRef.current
+    const api = apisRef.current.get(activeRef.current)
     if (!api) {
       matchesRef.current = []
       return 0
@@ -294,50 +396,64 @@ export function App() {
 
   const handleGoTo = useCallback((index: number) => {
     const matches = matchesRef.current
-    const api = apiRef.current
+    const api = apisRef.current.get(activeRef.current)
     if (!api || !matches[index]) return
     api.selectMatch(matches[index])
   }, [])
 
-  const handleReplaceOne = useCallback(
-    (text: string) => {
-      const api = apiRef.current
-      if (!api) return
-      api.replaceSelection(text)
-    },
-    [],
-  )
+  const handleReplaceOne = useCallback((text: string) => {
+    apisRef.current.get(activeRef.current)?.replaceSelection(text)
+  }, [])
 
-  const handleReplaceAll = useCallback(
-    (text: string) => {
-      const api = apiRef.current
-      if (!api) return 0
-      const n = api.replaceAll(matchesRef.current, text)
-      matchesRef.current = []
-      return n
+  const handleReplaceAll = useCallback((text: string) => {
+    const api = apisRef.current.get(activeRef.current)
+    if (!api) return 0
+    const n = api.replaceAll(matchesRef.current, text)
+    matchesRef.current = []
+    return n
+  }, [])
+
+  /* ---------- 标签页切换 ---------- */
+
+  const cycleTab = useCallback(
+    (delta: number) => {
+      const list = tabsRef.current
+      if (list.length < 2) return
+      const index = list.findIndex((t) => t.id === activeRef.current)
+      const next = list[(index + delta + list.length) % list.length]
+      selectTab(next.id)
     },
-    [],
+    [selectTab],
   )
 
   /* ---------- 菜单命令 ---------- */
 
   useEffect(() => {
-    const off = window.tfnMenu.onCommand((command) => {
+    const off = window.tfnMenu.onCommand((command, payload) => {
       switch (command) {
         case 'file.newWindow':
-          handleNewWindow()
+          void window.tfn.newWindow()
           break
+        case 'file.newTab':
         case 'file.newFile':
-          handleNewFile()
+          createTab()
           break
         case 'file.open':
-          void handleOpen()
+          void openFile()
           break
+        case 'file.openPaths': {
+          const paths = Array.isArray(payload) ? (payload as string[]) : []
+          for (const p of paths) void openFile(p)
+          break
+        }
         case 'file.save':
-          void handleSave()
+          void saveTab(activeRef.current)
           break
         case 'file.saveAs':
-          void handleSaveAs()
+          void saveTab(activeRef.current, true)
+          break
+        case 'file.closeTab':
+          void closeTab(activeRef.current)
           break
         case 'file.exportHtml':
           void handleExportHtml()
@@ -345,17 +461,32 @@ export function App() {
         case 'file.exportPdf':
           void handleExportPdf()
           break
-        case 'file.reveal':
-          if (doc.filePath) void window.tfn.revealInFolder(doc.filePath)
+        case 'file.reveal': {
+          const tab = tabsRef.current.find((t) => t.id === activeRef.current)
+          if (tab?.filePath) void window.tfn.revealInFolder(tab.filePath)
+          break
+        }
+        case 'settings.toggleAutoSave':
+          setAutoSave((prev) => {
+            const next = !prev
+            void window.tfn.setAutoSave(next)
+            return next
+          })
           break
         case 'edit.undo':
-          apiRef.current?.undo()
+          apisRef.current.get(activeRef.current)?.undo()
           break
         case 'edit.redo':
-          apiRef.current?.redo()
+          apisRef.current.get(activeRef.current)?.redo()
           break
         case 'edit.find':
           openFind()
+          break
+        case 'view.nextTab':
+          cycleTab(1)
+          break
+        case 'view.prevTab':
+          cycleTab(-1)
           break
         case 'view.toggleSourceMode':
           setMode((m) => (m === 'source' ? 'wysiwyg' : 'source'))
@@ -374,15 +505,14 @@ export function App() {
     })
     return off
   }, [
-    doc.filePath,
+    closeTab,
+    createTab,
+    cycleTab,
     handleExportHtml,
     handleExportPdf,
-    handleNewFile,
-    handleNewWindow,
-    handleOpen,
-    handleSave,
-    handleSaveAs,
+    openFile,
     openFind,
+    saveTab,
     theme,
   ])
 
@@ -400,26 +530,7 @@ export function App() {
       const nativePath = (file as File & { path?: string }).path
       if (!nativePath) return
       // 交给主进程读：编码探测、绝对路径、错误提示都和「打开…」完全一致。
-      // （原来这里用 FileReader，只能按 UTF-8 读，GBK 的老文件拖进来就是乱码。）
-      void window.tfn.readFile(nativePath).then((res) => {
-        if (!res.ok) {
-          setError(res.error ?? '打开文件失败')
-          return
-        }
-        userActionRef.current = true
-        const text = res.content ?? ''
-        markdownRef.current = text
-        pushExternal(text)
-        setDoc((d) => ({
-          ...d,
-          filePath: res.filePath ?? nativePath,
-          dirty: false,
-          title: file.name,
-          encoding: res.encoding ?? 'utf8',
-        }))
-        dirtyRef.current = false
-        void window.tfn.setDocState({ filePath: res.filePath ?? nativePath, dirty: false })
-      })
+      void openFile(nativePath)
     }
     window.addEventListener('dragover', onDragOver)
     window.addEventListener('drop', onDrop)
@@ -427,24 +538,47 @@ export function App() {
       window.removeEventListener('dragover', onDragOver)
       window.removeEventListener('drop', onDrop)
     }
-  }, [pushExternal])
+  }, [openFile])
 
-  /* ---------- 主题 ---------- */
+  /* ---------- 主题 / 标题 ---------- */
 
   useEffect(() => {
     document.documentElement.dataset.theme = theme
   }, [theme])
 
-  /**
-   * 窗口标题。
-   *
-   * 必须在渲染层设 `document.title`：页面自带 `<title>` 时，
-   * 渲染层的标题会盖掉主进程 `win.setTitle()` 的结果，
-   * 于是双击打开文件后任务栏上还是清一色「Trifluisnote」。
-   */
   useEffect(() => {
-    document.title = doc.filePath ? `${doc.title} — Trifluisnote` : 'Trifluisnote'
-  }, [doc.title, doc.filePath])
+    const tab = tabs.find((t) => t.id === activeId)
+    document.title = tab?.filePath ? `${tab.title} — Trifluisnote` : 'Trifluisnote'
+  }, [tabs, activeId])
+
+  /**
+   * 把标签页清单同步给主进程。
+   *
+   * 主进程据此更新窗口标题（活动标签页的名字 + 未保存标记）。
+   */
+  const syncKey = useMemo(
+    () =>
+      `${tabs
+        .map((t) => `${t.id}|${t.filePath}|${t.title}|${t.dirty ? 1 : 0}|${t.encoding}`)
+        .join(';')}#${activeId}`,
+    [tabs, activeId],
+  )
+
+  useEffect(() => {
+    // 还没拿到初始文档时不要同步空清单，否则主进程会把窗口标题冲成「Trifluisnote」
+    if (!tabs.length) return
+    void window.tfn.syncTabs(
+      tabs.map((t) => ({
+        id: t.id,
+        filePath: t.filePath,
+        title: t.title,
+        dirty: t.dirty,
+        encoding: t.encoding,
+      })),
+      activeId,
+    )
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [syncKey])
 
   /* ---------- 快捷键（窗口内） ---------- */
 
@@ -454,67 +588,152 @@ export function App() {
       if (!mod) return
       if (e.key === 's') {
         e.preventDefault()
-        if (e.shiftKey) void handleSaveAs()
-        else void handleSave()
+        if (e.shiftKey) void saveTab(activeRef.current, true)
+        else void saveTab(activeRef.current)
       } else if (e.key === 'o') {
         e.preventDefault()
-        void handleOpen()
+        void openFile()
       } else if (e.key === 'f') {
         e.preventDefault()
         openFind()
-      } else if (e.key === 'n' && e.altKey) {
+      } else if (e.key === 't' && !e.shiftKey) {
         e.preventDefault()
-        handleNewFile()
+        createTab()
+      } else if (e.key === 'w') {
+        e.preventDefault()
+        void closeTab(activeRef.current)
+      } else if (e.key === 'Tab') {
+        e.preventDefault()
+        cycleTab(e.shiftKey ? -1 : 1)
       }
     }
     window.addEventListener('keydown', onKeyDown)
     return () => window.removeEventListener('keydown', onKeyDown)
-  }, [handleOpen, handleSave, handleSaveAs, handleNewFile, openFind])
+  }, [closeTab, createTab, cycleTab, openFile, openFind, saveTab])
 
-  const onReady = useCallback((api: EditorApi) => {
-    apiRef.current = api
-  }, [])
+  /* ---------- 窗口失焦：赶紧落盘 ---------- */
 
-  /* ---------- 首屏：向主进程取回本窗口的文档 ---------- */
+  useEffect(() => {
+    const onBlur = () => {
+      for (const tab of tabsRef.current) {
+        if (tab.dirty) pushAutosave(tab.id)
+      }
+    }
+    window.addEventListener('blur', onBlur)
+    return () => window.removeEventListener('blur', onBlur)
+  }, [pushAutosave])
+
+  /* ---------- 首屏：取回本窗口的初始文档 + 崩溃快照 ---------- */
 
   useEffect(() => {
     let cancelled = false
-    void window.tfn.getDocState().then((state) => {
-      if (cancelled || !state) return
-      // 用户已经手动打开过别的文件，就不要用命令行传入的文档覆盖它
-      if (userActionRef.current) return
-      const content = state.content ?? ''
-      if (content) {
-        markdownRef.current = content
-        pushExternal(content)
+    void (async () => {
+      const state = await window.tfn.getStartupState()
+      if (cancelled) return
+      const first = state?.tabs?.[0]
+      /**
+       * 首屏内容 = 主进程给的内容，给什么显示什么。
+       *
+       * 启动内容（示例文档）由主进程决定要不要给：只有「安装后第一次启动」
+       * 才下发一次，平时启动这里就是空的 —— 空白页。
+       * 渲染层不再自带默认文案，免得每次启动都自动冒出一段内容。
+       */
+      const content = state?.content ?? ''
+      const id = first?.id ?? newTabId()
+      // 图片基准目录要在编辑器挂载前拿到（见 createTab 的注释）
+      const url = await window.tfn.baseUrl(first?.filePath ?? null)
+      if (cancelled) return
+      baseUrlsRef.current.set(id, url)
+      const tab: TabModel = {
+        id,
+        filePath: first?.filePath ?? null,
+        title: first?.title ?? '未命名',
+        encoding: first?.encoding ?? 'utf8',
+        dirty: false,
+        content,
+        clean: content,
       }
-      setDoc({
-        filePath: state.filePath,
-        dirty: state.dirty,
-        title: state.title,
-        encoding: state.encoding ?? 'utf8',
-      })
-    })
+      setTabs([tab])
+      setActiveId(id)
+
+      const items = await window.tfn.listRecovery()
+      if (!cancelled && items.length) setRecovery(items)
+    })()
     return () => {
       cancelled = true
     }
-  }, [pushExternal])
+  }, [])
+
+  /* ---------- 崩溃恢复 ---------- */
+
+  const restoreRecovery = useCallback(
+    async (item: RecoveryItem) => {
+      await window.tfn.resolveRecovery(item.id, 'restore')
+      setRecovery((prev) => prev.filter((x) => x.id !== item.id))
+      createTab({
+        filePath: item.filePath,
+        title: item.title,
+        encoding: item.encoding,
+        content: item.content,
+        dirty: true,
+      })
+    },
+    [createTab],
+  )
+
+  const discardRecovery = useCallback(async (item: RecoveryItem) => {
+    await window.tfn.resolveRecovery(item.id, 'discard')
+    setRecovery((prev) => prev.filter((x) => x.id !== item.id))
+  }, [])
+
+  /* ---------- 渲染 ---------- */
 
   const themeOptions = useMemo(() => THEMES, [])
+  const activeTab = tabs.find((t) => t.id === activeId)
+
+  /** 图片路径解析：按标签页各自的文档目录。 */
+  const resolveImageFor = useCallback(
+    (tabId: string) => (src: string) => resolveImageSrc(src, baseUrlsRef.current.get(tabId) ?? ''),
+    [],
+  )
+
+  /** 粘贴图片的落盘器：按标签页各自的文档目录。 */
+  const uploaderFor = useCallback(
+    (tabId: string) =>
+      createImageUploader({
+        save: async (fileName, data) => {
+          const tab = tabsRef.current.find((t) => t.id === tabId)
+          const res = await window.tfn.saveImage({
+            fileName,
+            data,
+            docPath: tab?.filePath ?? null,
+          })
+          return res.ok ? res.path ?? null : null
+        },
+      }),
+    [],
+  )
 
   return (
     <div className="tfn-app">
       <header className="tfn-toolbar">
-        <button className="tfn-btn tfn-btn--primary" onClick={() => void handleOpen()}>
+        <button className="tfn-btn tfn-btn--primary" onClick={() => void openFile()}>
           打开
         </button>
-        <button className="tfn-btn" onClick={() => void handleSave()} disabled={!doc.dirty && !!doc.filePath}>
+        <button
+          className="tfn-btn"
+          onClick={() => void saveTab(activeId)}
+          disabled={!activeTab?.dirty && !!activeTab?.filePath}
+        >
           保存
         </button>
-        <button className="tfn-btn" onClick={() => void handleSaveAs()}>
+        <button className="tfn-btn" onClick={() => void saveTab(activeId, true)}>
           另存为
         </button>
-        <button className="tfn-btn" onClick={handleNewWindow}>
+        <button className="tfn-btn" onClick={() => createTab()}>
+          新建标签页
+        </button>
+        <button className="tfn-btn" onClick={() => void window.tfn.newWindow()}>
           新窗口
         </button>
         <span className="tfn-toolbar__sep" />
@@ -549,10 +768,43 @@ export function App() {
           ))}
         </select>
         <span className="tfn-toolbar__title">
-          {doc.title}
-          {doc.dirty ? ' •' : ''}
+          {activeTab?.title ?? ''}
+          {activeTab?.dirty ? ' •' : ''}
         </span>
       </header>
+
+      <TabBar
+        tabs={tabs.map((t) => ({ id: t.id, title: t.title, dirty: t.dirty }))}
+        activeId={activeId}
+        onSelect={(id) => selectTab(id)}
+        onClose={(id) => void closeTab(id)}
+        onNew={() => createTab()}
+      />
+
+      {recovery.length > 0 && (
+        <div className="tfn-recovery" role="status">
+          <span className="tfn-recovery__title">发现未保存的内容（上次可能异常退出）</span>
+          {recovery.map((item) => (
+            <span key={item.id} className="tfn-recovery__item">
+              <span className="tfn-recovery__name">{item.title}</span>
+              <button className="tfn-btn" onClick={() => void restoreRecovery(item)}>
+                恢复
+              </button>
+              <button className="tfn-btn" onClick={() => void discardRecovery(item)}>
+                丢弃
+              </button>
+            </span>
+          ))}
+          <button
+            className="tfn-btn"
+            onClick={() => {
+              for (const item of recovery) void discardRecovery(item)
+            }}
+          >
+            全部丢弃
+          </button>
+        </div>
+      )}
 
       <FindBar
         open={findOpen}
@@ -569,33 +821,55 @@ export function App() {
           open={outlineOpen}
           onToggle={() => setOutlineOpen((v) => !v)}
           onSelect={(pos) => {
-            apiRef.current?.goToOutline(pos)
+            apisRef.current.get(activeId)?.goToOutline(pos)
             setOutlineOpen(false)
           }}
         />
 
         <main className="tfn-editor-host">
-          <EditorPane
-            externalContent={external.content}
-            externalToken={external.token}
-            mode={mode}
-            onChange={handleChange}
-            onApplied={handleApplied}
-            onStats={setStats}
-            onReady={onReady}
-            onOutline={setOutline}
-          />
+          {tabs.map((tab) => (
+            <EditorPane
+              key={tab.id}
+              tabId={tab.id}
+              defaultContent={tab.content}
+              visible={tab.id === activeId}
+              mode={mode}
+              resolveImage={resolveImageFor(tab.id)}
+              uploader={uploaderFor(tab.id)}
+              onChange={(markdown) => handleChange(tab.id, markdown)}
+              onApplied={(canonical) => handleApplied(tab.id, canonical)}
+              onStats={(value) => handleStats(tab.id, value)}
+              onOutline={(items) => handleOutline(tab.id, items)}
+              onReady={(api) => apisRef.current.set(tab.id, api)}
+              onMathEdit={(ref) => setMathEdit(ref)}
+            />
+          ))}
         </main>
       </div>
 
       <footer className="tfn-statusbar">
-        <span>{doc.filePath ?? '未保存到磁盘'}</span>
+        <span>{activeTab?.filePath ?? '未保存到磁盘'}</span>
         <span className="tfn-statusbar__spacer" />
-        <span>{encodingLabel(doc.encoding)}</span>
+        {activeTab?.savedAt && !activeTab.dirty && (
+          <span>已自动保存 {new Date(activeTab.savedAt).toLocaleTimeString()}</span>
+        )}
+        {autoSave && !activeTab?.savedAt && <span>自动保存已开启</span>}
+        <span>{encodingLabel(activeTab?.encoding ?? 'utf8')}</span>
         <span>{mode === 'source' ? '源码模式' : '所见即所得'}</span>
         <span>{stats.words} 字</span>
         <span>{stats.chars} 字符</span>
       </footer>
+
+      {mathEdit && (
+        <MathDialog
+          value={mathEdit.value}
+          onCancel={() => setMathEdit(null)}
+          onApply={(value) => {
+            apisRef.current.get(activeId)?.setMathValue(mathEdit.pos, value)
+            setMathEdit(null)
+          }}
+        />
+      )}
 
       {error && (
         <div className="tfn-error" role="alert" onClick={() => setError(null)}>
@@ -604,9 +878,4 @@ export function App() {
       )}
     </div>
   )
-}
-
-function baseName(filePath: string | null): string {
-  if (!filePath) return '未命名'
-  return filePath.split(/[\\/]/).pop() ?? filePath
 }

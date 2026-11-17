@@ -2,6 +2,8 @@ import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
 import { App } from './App'
 import { THEME_CSS } from '../shared/theme-css'
+// KaTeX 的样式：编辑器里的公式靠它排版
+import 'katex/dist/katex.min.css'
 import './styles.css'
 
 const container = document.getElementById('root')

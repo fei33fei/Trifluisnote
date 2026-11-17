@@ -1,6 +1,6 @@
 {
   "name": "trifluisnote",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Trifluisnote — 一个所见即所得的 Markdown 桌面编辑器",
   "main": "./out/main/index.js",
   "author": "Fey",
@@ -32,8 +32,10 @@
     "@milkdown/theme-nord": "7.23.0",
     "highlight.js": "^11.11.1",
     "iconv-lite": "^0.6.3",
+    "katex": "^0.19.1",
     "react": "19.3.1",
-    "react-dom": "19.3.1"
+    "react-dom": "19.3.1",
+    "remark-math": "^6.0.0"
   },
   "devDependencies": {
     "@types/node": "^22.12.0",

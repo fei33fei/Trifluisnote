@@ -22,7 +22,8 @@ import { redoCommand, undoCommand, history } from '@milkdown/kit/plugin/history'
 import { indent } from '@milkdown/kit/plugin/indent'
 import { trailing } from '@milkdown/kit/plugin/trailing'
 import { clipboard } from '@milkdown/kit/plugin/clipboard'
-import { upload } from '@milkdown/kit/plugin/upload'
+import { upload, uploadConfig } from '@milkdown/kit/plugin/upload'
+import type { Uploader } from '@milkdown/kit/plugin/upload'
 import { commonmark } from '@milkdown/preset-commonmark'
 import { gfm } from '@milkdown/preset-gfm'
 import { callCommand, getMarkdown, replaceAll } from '@milkdown/kit/utils'
@@ -32,10 +33,17 @@ import { TextSelection } from '@milkdown/prose/state'
 import type { EditorView } from '@milkdown/prose/view'
 import { codeHighlightPlugin } from './highlight'
 import { taskListPlugin } from './task-list'
+import { imagePlugin } from './image'
+import type { ImageResolver } from './image'
+import { mathPlugin } from './math'
 
 export interface CoreEditorOptions {
   /** 初始 markdown 内容 */
   defaultValue: string
+  /** 把 markdown 里的图片路径解析成可显示的 URL */
+  resolveImage?: ImageResolver
+  /** 粘贴 / 拖入图片时的落盘器 */
+  uploader?: Uploader
 }
 
 /**
@@ -79,6 +87,22 @@ export function buildEditorFactory(options: CoreEditorOptions) {
           bullet: '-' as const,
           listItemIndent: 'one' as const,
         }))
+
+        /**
+         * 图片落盘。
+         *
+         * 默认的 uploader 会把图片转成 base64 data URI 直接塞进 markdown，
+         * 文档会瞬间膨胀几百倍。这里换成自己的 uploader：
+         * 把图片写到文档旁边的 `assets/`，markdown 里只留一个相对路径。
+         */
+        if (options.uploader) {
+          ctx.update(uploadConfig.key, (prev) => ({
+            ...prev,
+            uploader: options.uploader as Uploader,
+            // 从网页复制带图内容时，也把图片取下来落盘，而不是留一个外链
+            enableHtmlFileUploader: true,
+          }))
+        }
       })
       .use(listener)
       .use(history)
@@ -88,12 +112,20 @@ export function buildEditorFactory(options: CoreEditorOptions) {
       .use(trailing)
       .use(clipboard)
       .use(upload)
+      // 图片节点顶掉 commonmark 预设里的同名实现（$node 是 upsert 语义）
+      .use(imagePlugin(options.resolveImage ?? ((src: string) => src)))
+      // 数学公式：remark-math + KaTeX 节点
+      .use(mathPlugin())
       .use(codeHighlightPlugin())
       .use(taskListPlugin())
 }
 
-export function createCoreEditor(root: HTMLElement, defaultValue: string): Editor {
-  return buildEditorFactory({ defaultValue })(root)
+export function createCoreEditor(
+  root: HTMLElement,
+  defaultValue: string,
+  options: Omit<CoreEditorOptions, 'defaultValue'> = {},
+): Editor {
+  return buildEditorFactory({ defaultValue, ...options })(root)
 }
 
 /** 把当前文档序列化成 markdown。 */

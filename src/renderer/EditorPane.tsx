@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { Editor, editorViewCtx } from '@milkdown/core'
 import { Milkdown, MilkdownProvider, useEditor } from '@milkdown/react'
+import type { Uploader } from '@milkdown/kit/plugin/upload'
 import {
   buildEditorFactory,
   countStats,
@@ -18,6 +19,8 @@ import {
   writeMarkdown,
 } from '../core/editor'
 import type { FindMatch } from '../core/editor'
+import { findMathByElement, setMathValue } from '../core/math'
+import type { MathNodeRef } from '../core/math'
 import { jumpToOutline, readOutline } from '../core/outline'
 import type { OutlineItem } from '../core/outline'
 
@@ -42,38 +45,41 @@ export interface EditorApi {
   replaceSelection: (text: string) => void
   /** 全部替换 */
   replaceAll: (matches: FindMatch[], text: string) => number
+  /** 找到 DOM 元素对应的公式节点 */
+  findMath: (el: Element) => MathNodeRef | null
+  /** 改写公式源码 */
+  setMathValue: (pos: number, value: string) => void
 }
 
 export interface EditorPaneProps {
-  /**
-   * 外部推入的文档内容（打开文件 / 新建文件时由上层送入）。
-   *
-   * ⚠ 这条通道是**单向**的：它只用于「真正替换整个文档」的场景，
-   * 绝不能拿编辑器的变更回灌进来 —— 否则会形成
-   * 「编辑器改动 → 回灌 → 整篇 replaceAll → 再次触发改动」的自激循环。
-   */
-  externalContent: string
-  /**
-   * 外部内容的版本号，每次外部替换 +1。
-   *
-   * 即便内容完全相同也要靠它强制重新执行 effect：
-   * React 只比较 prop 的值，`content` 没变就不会重新应用。
-   */
-  externalToken: number
+  /** 标签页 id（多标签页下每个标签页一个独立编辑器实例） */
+  tabId: string
+  /** 编辑器创建时的初始内容 */
+  defaultContent: string
+  /** 是否为当前激活的标签页 */
+  visible: boolean
   mode: ViewMode
+  /** 把 markdown 里的图片路径解析成可显示的 URL */
+  resolveImage: (src: string) => string
+  /** 粘贴 / 拖入图片时的落盘器 */
+  uploader: Uploader
   /** 编辑器内容发生变化（防抖 200ms 后触发） */
   onChange: (markdown: string) => void
-  /** 外部内容已应用完成，回调应用后的规范化 markdown */
+  /** 编辑器就绪、初始内容已应用完成，回调应用后的规范化 markdown */
   onApplied?: (markdown: string) => void
   onStats: (stats: { words: number; chars: number }) => void
+  onOutline: (items: OutlineItem[]) => void
   onReady: (api: EditorApi) => void
-  /** 大纲变化时回调（用于侧栏刷新） */
-  onOutline?: (items: OutlineItem[]) => void
+  /** 双击公式：交给上层弹编辑框 */
+  onMathEdit: (ref: MathNodeRef) => void
 }
 
 /**
  * Milkdown 的 React 集成要求 useEditor 与 <Milkdown /> 同处一个
  * MilkdownProvider 下：useEditor 负责注册工厂，<Milkdown /> 负责创建实例。
+ *
+ * v0.2 起每个标签页挂一个独立的 EditorPane（也就是一个独立的编辑器实例），
+ * 这样每个标签页各自保有文档、撤销栈和光标位置，切换标签页不会串味。
  */
 export function EditorPane(props: EditorPaneProps) {
   return (
@@ -84,46 +90,27 @@ export function EditorPane(props: EditorPaneProps) {
 }
 
 function EditorPaneInner(props: EditorPaneProps) {
-  const { mode } = props
+  const { mode, visible } = props
 
   // 用 ref 固定回调身份，避免每次渲染都重新订阅监听器
   const propsRef = useRef(props)
   propsRef.current = props
 
   const editorRef = useRef<Editor | undefined>(undefined)
-  const [sourceText, setSourceText] = useState(props.externalContent)
+  const apiRef = useRef<EditorApi | null>(null)
+  const [sourceText, setSourceText] = useState(props.defaultContent)
   const sourceRef = useRef<HTMLTextAreaElement | null>(null)
   const modeRef = useRef<ViewMode>(mode)
   modeRef.current = mode
 
-  /** 已经应用过的外部内容版本号。 */
-  const appliedTokenRef = useRef(props.externalToken)
-
   const { get, loading } = useEditor(
-    buildEditorFactory({ defaultValue: propsRef.current.externalContent }),
+    buildEditorFactory({
+      defaultValue: propsRef.current.defaultContent,
+      resolveImage: (src: string) => propsRef.current.resolveImage(src),
+      uploader: propsRef.current.uploader,
+    }),
     [],
   )
-
-  /**
-   * 应用一次外部内容替换。
-   *
-   * 应用完成后回传「应用后的规范化 markdown」，
-   * 上层用它建立「未修改」基线，避免把这次程序化替换误判成用户改动。
-   */
-  const applyExternal = useCallback((content: string): boolean => {
-    const editor = editorRef.current
-    if (!editor) return false
-
-    if (modeRef.current === 'source') {
-      setSourceText(content)
-      propsRef.current.onApplied?.(content)
-      return true
-    }
-
-    writeMarkdown(editor, content)
-    propsRef.current.onApplied?.(readMarkdown(editor))
-    return true
-  }, [])
 
   // 编辑器实例就绪（loading 变 false）后：订阅变更 + 暴露命令接口
   useEffect(() => {
@@ -138,7 +125,7 @@ function EditorPaneInner(props: EditorPaneProps) {
       propsRef.current.onOutline?.(readOutline(editor))
     })
 
-    propsRef.current.onReady({
+    const api: EditorApi = {
       getMarkdown: () => readMarkdown(editor),
       setMarkdown: (markdown: string) => writeMarkdown(editor, markdown),
       getRenderedHtml: () => readRenderedHtml(editor),
@@ -154,21 +141,27 @@ function EditorPaneInner(props: EditorPaneProps) {
       selectMatch: (match: FindMatch) => selectMatch(editor, match),
       replaceSelection: (text: string) => replaceSelection(editor, text),
       replaceAll: (matches: FindMatch[], text: string) => replaceAllMatches(editor, matches, text),
-    })
+      findMath: (el: Element) => findMathByElement(editor, el),
+      setMathValue: (pos: number, value: string) => setMathValue(editor, pos, value),
+    }
+    apiRef.current = api
+    propsRef.current.onReady(api)
 
     propsRef.current.onStats(readStats(editor))
     propsRef.current.onOutline?.(readOutline(editor))
 
-    // 编辑器是异步创建的：若外部内容在就绪之前就到了，这里补一次应用。
-    const pending = propsRef.current
-    if (appliedTokenRef.current !== pending.externalToken) {
-      if (applyExternal(pending.externalContent)) {
-        appliedTokenRef.current = pending.externalToken
-      }
-    }
+    /**
+     * 初始内容已经应用完成。
+     *
+     * 回传「应用后的规范化 markdown」：remark 解析再序列化之后，
+     * 内容不一定和文件里的一字不差（空行、列表符号都会被规范化）。
+     * 上层拿它当「未修改」基线，才不会一打开就显示成已修改。
+     */
+    propsRef.current.onApplied?.(readMarkdown(editor))
 
     return () => {
       editorRef.current = undefined
+      apiRef.current = null
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [loading])
@@ -190,16 +183,6 @@ function EditorPaneInner(props: EditorPaneProps) {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [mode])
-
-  // 外部内容替换（打开文件 / 新建文件）
-  useEffect(() => {
-    if (appliedTokenRef.current === props.externalToken) return
-    // 编辑器还没就绪时不能标记为「已应用」，否则这份内容就永远丢了；
-    // 等就绪后的那个 effect 会补上。
-    if (!applyExternal(props.externalContent)) return
-    appliedTokenRef.current = props.externalToken
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [props.externalToken, props.externalContent])
 
   const handleSourceChange = useCallback((e: React.ChangeEvent<HTMLTextAreaElement>) => {
     const text = e.target.value
@@ -223,7 +206,7 @@ function EditorPaneInner(props: EditorPaneProps) {
     if (modeRef.current === 'source') return
     const editor = editorRef.current
     if (!editor) return
-    const view = editor.ctx.get(editorViewCtx)
+    const view = editor.action((ctx) => ctx.get(editorViewCtx))
     if (!view) return
     // 落在正文内部 → 交给 ProseMirror 自己的命中测试
     if (view.dom.contains(e.target as Node)) return
@@ -231,22 +214,42 @@ function EditorPaneInner(props: EditorPaneProps) {
     e.preventDefault()
   }, [])
 
+  /** 双击公式 → 打开编辑框。 */
+  const handleDoubleClick = useCallback((e: React.MouseEvent<HTMLDivElement>) => {
+    const target = e.target as HTMLElement | null
+    if (!target?.closest) return
+    const holder = target.closest('[data-math-inline],[data-math-block]')
+    if (!holder) return
+    const api = apiRef.current
+    if (!api) return
+    const ref = api.findMath(holder)
+    if (!ref) return
+    e.preventDefault()
+    propsRef.current.onMathEdit(ref)
+  }, [])
+
   return (
-    <div className="tfn-editor-wrap" onMouseDown={handleMouseDown}>
-      <div className="tfn-editor" hidden={mode === 'source'}>
-        <div className="tfn-doc">
-          <Milkdown />
+    <div
+      className={`tfn-editor-pane${visible ? '' : ' is-hidden'}`}
+      onMouseDown={handleMouseDown}
+      onDoubleClick={handleDoubleClick}
+    >
+      <div className="tfn-editor-wrap">
+        <div className="tfn-editor" hidden={mode === 'source'}>
+          <div className="tfn-doc">
+            <Milkdown />
+          </div>
         </div>
+        {mode === 'source' && (
+          <textarea
+            ref={sourceRef}
+            className="tfn-source"
+            value={sourceText}
+            onChange={handleSourceChange}
+            spellCheck={false}
+          />
+        )}
       </div>
-      {mode === 'source' && (
-        <textarea
-          ref={sourceRef}
-          className="tfn-source"
-          value={sourceText}
-          onChange={handleSourceChange}
-          spellCheck={false}
-        />
-      )}
     </div>
   )
 }
